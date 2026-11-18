@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a GitHub release with this tag (e.g. v0.1.0). Leave empty to only build.'
+        required: false
+        type: string
 
 env:
   DOTNET_NOLOGO: true
@@ -71,16 +76,35 @@ jobs:
           Packaging/Windows/Packages/**/*.msi
           *.zip
 
+  release:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download Windows packages
+      uses: actions/download-artifact@v4
+      with:
+        pattern: windows-*
+        path: artifacts
+
     - name: GH Release
-      if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ inputs.release_tag || github.ref_name }}
+        target_commitish: ${{ github.sha }}
+        name: PTZ Joystick Control ${{ inputs.release_tag || github.ref_name }}
         prerelease: true
+        generate_release_notes: true
         files: |
-          Packaging/Windows/Packages/**/*.msi
-          *.zip
+          artifacts/**/*.msi
+          artifacts/**/*.zip
 
   build-macos-packeges:
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
 
@@ -139,9 +163,8 @@ jobs:
           path: "*.dmg"
 
     - name: GH Release
-      if: ${{ github.event_name == 'push' }}
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
           prerelease: true
-          tag_name: v$${{ steps.version.outputs.VERSION }}
           files: "*.dmg"
