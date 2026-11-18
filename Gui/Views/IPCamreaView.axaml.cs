@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using PtzJoystickControl.Core.Video;
 using PtzJoystickControl.Gui.ViewModels;
 
 namespace PtzJoystickControl.Gui.Views;
@@ -12,7 +13,23 @@ public partial class IPCameraView : UserControl
         InitializeComponent();
     }
 
-    private async void OnVideoClicked(object? sender, RoutedEventArgs e)
+    private async void OnPickNdiClicked(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not IPCameraViewModel camera)
+            return;
+
+        var picker = new NdiSourcePickerWindow();
+        string? name = null;
+        if (TopLevel.GetTopLevel(this) is Window owner)
+            name = await picker.ShowDialog<string?>(owner);
+        else
+            picker.Show();
+
+        if (!string.IsNullOrWhiteSpace(name))
+            camera.VideoUrl = VideoSourceUrl.NdiUrl(name);
+    }
+
+    private void OnVideoClicked(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not IPCameraViewModel camera)
             return;
@@ -23,8 +40,9 @@ public partial class IPCameraView : UserControl
             DataContext = new VideoViewModel(camera.Name, camera.VideoUrl),
         };
 
+        // Not modal: the main window stays usable (and several videos can be open at once).
         if (TopLevel.GetTopLevel(this) is Window owner)
-            await window.ShowDialog(owner);
+            window.Show(owner);
         else
             window.Show();
     }

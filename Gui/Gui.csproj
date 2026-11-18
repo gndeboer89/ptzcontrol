@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-	<Version>0.1.0.0</Version>
+	<Version>0.1.2.0</Version>
     <OutputType>WinExe</OutputType>
 	<Title>PTZ Joystick Control</Title>
 	<AssemblyTitle>PTZ Joystick Control</AssemblyTitle>
@@ -13,6 +13,12 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <RootNamespace>PtzJoystickControl.Gui</RootNamespace>
     <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
+    <!-- Ship only the VLC build that matches the target; the package otherwise copies x86, x64 and arm64 (~280 MB). -->
+    <VlcWindowsX64Enabled>$([System.String]::Equals('$(RuntimeIdentifier)', 'win-x64'))</VlcWindowsX64Enabled>
+    <VlcWindowsX86Enabled>$([System.String]::Equals('$(RuntimeIdentifier)', 'win-x86'))</VlcWindowsX86Enabled>
+    <VlcWindowsArm64Enabled>$([System.String]::Equals('$(RuntimeIdentifier)', 'win-arm64'))</VlcWindowsArm64Enabled>
   </PropertyGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
@@ -32,6 +38,7 @@
     <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
     <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="11.3.23" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <PackageReference Include="NDILibDotNetCoreBase" Version="2024.7.22.1" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.2" />
     <PackageReference Condition="$([MSBuild]::IsOSPlatform('Windows')) Or $(RuntimeIdentifier.StartsWith('win'))" Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
     <PackageReference Include="Avalonia.ReactiveUI" Version="11.3.9" />

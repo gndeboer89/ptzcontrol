@@ -290,3 +290,86 @@ public class UpdateServiceTests
     public void ThreePartTagsWork() =>
         Assert.True(Eval(("v0.2.0", "https://x/a", false)).Available);
 }
+
+public class FrameCopyTests
+{
+    [Fact]
+    public void RoundTripsWithPaddedStride()
+    {
+        const int rows = 3, rowBytes = 8, stride = 12;
+        var native = System.Runtime.InteropServices.Marshal.AllocHGlobal(rows * stride);
+        try
+        {
+            // Fill rows with row*10+col, padding with 0xEE
+            var seed = new byte[rows * stride];
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < stride; c++)
+                    seed[r * stride + c] = c < rowBytes ? (byte)(r * 10 + c) : (byte)0xEE;
+            System.Runtime.InteropServices.Marshal.Copy(seed, 0, native, seed.Length);
+
+            var packed = new byte[rows * rowBytes];
+            FrameCopy.ToManaged(native, stride, rows, rowBytes, packed);
+
+            Assert.Equal(new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27 }, packed);
+
+            // Back into a differently padded native buffer
+            const int stride2 = 16;
+            var native2 = System.Runtime.InteropServices.Marshal.AllocHGlobal(rows * stride2);
+            try
+            {
+                FrameCopy.ToNative(packed, rows, rowBytes, native2, stride2);
+                var back = new byte[rows * stride2];
+                System.Runtime.InteropServices.Marshal.Copy(native2, back, 0, back.Length);
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < rowBytes; c++)
+                        Assert.Equal(packed[r * rowBytes + c], back[r * stride2 + c]);
+            }
+            finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(native2); }
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(native); }
+    }
+
+    [Fact]
+    public void TightStrideCopiesWholeFrameAtOnce()
+    {
+        var native = System.Runtime.InteropServices.Marshal.AllocHGlobal(8);
+        try
+        {
+            System.Runtime.InteropServices.Marshal.Copy(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, 0, native, 8);
+            var dst = new byte[8];
+            FrameCopy.ToManaged(native, 4, 2, 4, dst);
+            Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, dst);
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(native); }
+    }
+
+    [Fact]
+    public void RejectsBadArguments()
+    {
+        var buffer = new byte[16];
+        Assert.Throws<ArgumentException>(() => FrameCopy.ToManaged(IntPtr.Zero, 4, 2, 4, buffer));
+        var native = System.Runtime.InteropServices.Marshal.AllocHGlobal(16);
+        try
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => FrameCopy.ToManaged(native, 2, 2, 4, buffer)); // stride < row
+            Assert.Throws<ArgumentException>(() => FrameCopy.ToManaged(native, 4, 8, 4, buffer));            // buffer too small
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(native); }
+    }
+}
+
+public class NdiUrlTests
+{
+    [Theory]
+    [InlineData("STUDIO-PC (Camera 1)")]
+    [InlineData("PC (100% sure)")]
+    [InlineData("Camera%20X")]
+    [InlineData("Ünïcode (Cam)")]
+    public void NdiUrlRoundTrips(string name)
+    {
+        var url = VideoSourceUrl.NdiUrl(name);
+
+        Assert.Equal(VideoSourceKind.Ndi, VideoSourceUrl.Classify(url));
+        Assert.Equal(name, VideoSourceUrl.NdiSourceName(url));
+    }
+}

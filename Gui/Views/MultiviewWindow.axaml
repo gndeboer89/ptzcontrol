@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="using:PtzJoystickControl.Gui.Views"
+        xmlns:vm="using:PtzJoystickControl.Gui.ViewModels"
+        x:Class="PtzJoystickControl.Gui.Views.MultiviewWindow"
+        x:DataType="vm:MultiviewViewModel"
+        Width="1100" Height="680" MinWidth="400" MinHeight="300"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/icon.ico"
+        Title="Multiview">
+
+	<Grid RowDefinitions="Auto,*" Background="#101010">
+		<Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="8,6">
+			<TextBlock Grid.Column="0" Text="{Binding Summary}" TextWrapping="Wrap" VerticalAlignment="Center" Opacity="0.85"/>
+			<TextBlock Grid.Column="1" Text="Columns" VerticalAlignment="Center" Margin="10,0,6,0" IsVisible="{Binding HasTiles}"/>
+			<ComboBox Grid.Column="2" ItemsSource="{Binding ColumnChoices}" SelectedItem="{Binding ColumnChoice}" IsVisible="{Binding HasTiles}" MinWidth="80">
+				<ComboBox.ItemTemplate>
+					<DataTemplate x:DataType="x:Int32">
+						<TextBlock Text="{Binding, Converter={x:Static v:ColumnChoiceConverter.Instance}}"/>
+					</DataTemplate>
+				</ComboBox.ItemTemplate>
+			</ComboBox>
+		</Grid>
+
+		<ItemsControl Grid.Row="1" ItemsSource="{Binding Tiles}">
+			<ItemsControl.ItemsPanel>
+				<ItemsPanelTemplate>
+					<UniformGrid Columns="{Binding Columns}"/>
+				</ItemsPanelTemplate>
+			</ItemsControl.ItemsPanel>
+			<ItemsControl.ItemTemplate>
+				<DataTemplate x:DataType="vm:VideoViewModel">
+					<Border Margin="3" BorderThickness="2" BorderBrush="#444" Background="Black" Tapped="OnTileTapped">
+						<Grid RowDefinitions="*,Auto">
+							<v:VideoSurface Grid.Row="0"/>
+							<Border Grid.Row="1" Background="#202020" Padding="6,3">
+								<Grid ColumnDefinitions="*,Auto">
+									<TextBlock Grid.Column="0" Text="{Binding CameraName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+									<TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" MaxWidth="260"/>
+								</Grid>
+							</Border>
+						</Grid>
+					</Border>
+				</DataTemplate>
+			</ItemsControl.ItemTemplate>
+		</ItemsControl>
+	</Grid>
+</Window>
