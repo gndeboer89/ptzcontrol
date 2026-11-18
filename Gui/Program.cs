@@ -74,8 +74,8 @@ internal class Program
         services.Register<IGitHubClient>(() => new GitHubClient(new ProductHeaderValue("PTZJoystickControl-UpdateChecker")));
         services.Register<IUpdateService>(() => new UpdateService(
             resolver.GetServiceOrThrow<IGitHubClient>(),
-            "AronHetLam",
-            "PTZJoystickControl",
+            "gndeboer89",
+            "ptzcontrol",
             Assembly.GetExecutingAssembly().GetName().Version!));
 
         services.RegisterConstant<ICameraSettingsStore>(new CameraSettingsStore());

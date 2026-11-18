@@ -1,104 +1,84 @@
-name: Build release packages
+name: Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "claude/**" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
 
 jobs:
 
-  bump-version:
-    runs-on: ubuntu-latest
-    
-    outputs: 
-      VERSION: ${{ steps.version-select.outputs.VERSION }}
-      
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
-      - name: Bump version
-        if: ${{ github.event_name == 'push' && github.run_attempt == 1 }}
-        uses: SiqiLu/dotnet-bump-version@2.0.0
-        with:
-          version_files: "Gui/Gui.csproj"
-          version_mask: 0.0.1.0
-          version_overwrite: "*.*.*.${{ github.run_number }}"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Tag version in git and set as output
-        id: version-select
-        run: |
-          version=$(grep -oP '<Version>\K(.*)(?=\.\d+</Version>)' Gui/Gui.csproj)
-          echo "Version: ${version}"
-          git tag v$version
-          git push --tags
-          echo "VERSION=$version" >> $GITHUB_OUTPUT
-
-  build-windows-packeges:
-    needs: bump-version
+  build-windows:
     runs-on: windows-latest
     strategy:
-       matrix:
-          arch: [x86, x64]
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
 
-    steps:    
+    steps:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install .NET Core
+    - name: Install .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
 
-    - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@v2
+    - name: Read version
+      id: version
+      shell: pwsh
+      run: |
+        $v = ([xml](Get-Content Gui/Gui.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        Write-Output "Version: $v"
+        "VERSION=$v" >> $env:GITHUB_OUTPUT
 
-    ## Execute all unit tests in the solution
-    #- name: Execute unit tests
-    #  run: dotnet test
+    - name: Build
+      run: dotnet build PTZJoystickControl.sln -c Release -p:Platform="Any CPU" --no-incremental -p:TreatWarningsAsErrors=false
 
-    - name: Publish application
-      run: dotnet publish Gui/Gui.csproj -c PublishRelease -r $env:Runtime --self-contained
-      env:
-        Runtime: ${{ format('win-{0}', matrix.arch) }}
+    - name: Publish application (self-contained)
+      run: dotnet publish Gui/Gui.csproj -c PublishRelease -r win-${{ matrix.arch }} --self-contained
 
-    ## Decode the base 64 encoded pfx and save the Signing_Certificate
-    #- name: Decode the pfx
-    #  run: |
-    #    $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.Base64_Encoded_Pfx }}")
-    #    $certificatePath = Join-Path -Path $env:Wap_Project_Directory -ChildPath GitHubActionsWorkflow.pfx
-    #    [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
+    - name: Create portable zip
+      shell: pwsh
+      run: |
+        $name = "PTZJoystickControl_v${{ steps.version.outputs.VERSION }}_win_${{ matrix.arch }}_portable"
+        Compress-Archive -Path "Gui/bin/PublishRelease/net10.0/win-${{ matrix.arch }}/publish/*" -DestinationPath "$name.zip"
 
-    # Create the app package by building and packaging the Windows Application Packaging project
     - name: Create msi package
-      run: dotnet build Packaging/Windows/Windows.wixproj -c PublishRelease -p:OutputName=$env:OutputName -o Packaging/Windows/Packages -p:platform=$env:Arch #-p:PackageCertificateKeyFile=GitHubActionsWorkflow.pfx -p:PackageCertificatePassword=${{ secrets.Pfx_Key }}
-      env:
-        Arch: ${{ matrix.arch }}
-        OutputName: ${{ format('PTZJoystickControl_v{0}_win_{1}', needs.bump-version.outputs.VERSION, matrix.arch) }}
+      run: dotnet build Packaging/Windows/Windows.wixproj -c PublishRelease -p:OutputName=${{ format('PTZJoystickControl_v{0}_win_{1}', steps.version.outputs.VERSION, matrix.arch) }} -o Packaging/Windows/Packages -p:platform=${{ matrix.arch }}
 
-    ## Remove the pfx
-    #- name: Remove the pfx
-    #  run: Remove-Item -path $env:Wap_Project_Directory\GitHubActionsWorkflow.pfx
+    - name: Smoke test (published exe starts and stays up)
+      shell: pwsh
+      run: |
+        $p = Start-Process "Gui/bin/PublishRelease/net10.0/win-${{ matrix.arch }}/publish/Gui.exe" -PassThru
+        Start-Sleep -Seconds 10
+        if ($p.HasExited) { throw "Gui.exe exited early with code $($p.ExitCode)" }
+        Stop-Process $p
 
-    - name: Upload build artifacts (msi packages)
-      if: ${{ github.event_name == 'push' }}
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: MSI Packages ${{ matrix.arch }}
-        path: Packaging/Windows/Packages/**/*.msi
+        name: windows-${{ matrix.arch }}
+        path: |
+          Packaging/Windows/Packages/**/*.msi
+          *.zip
 
     - name: GH Release
-      if: ${{ github.event_name == 'push' }}
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
         prerelease: true
-        tag_name: v${{ needs.bump-version.outputs.VERSION }}
-        files: Packaging/Windows/Packages/**/*.msi
+        files: |
+          Packaging/Windows/Packages/**/*.msi
+          *.zip
 
   build-macos-packeges:
-    needs: bump-version
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
 
     steps:    
@@ -109,6 +89,10 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
+
+    - name: Read version
+      id: version
+      run: echo "VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Gui/Gui.csproj | head -1)" >> $GITHUB_OUTPUT
 
     - name: Build
       run: dotnet publish Gui/Gui.csproj -c PublishRelease -r osx-x64 --self-contained #/p:PublishSingleFile=true /p:PublishTrimmed=true
@@ -126,7 +110,7 @@ jobs:
         cp Packaging/Mac/Info.plist dist/PTZJoystickControl.app/Contents/
 
     - name: Update Info.plist version
-      run: sed -i '' -e ':a' -e 'N' -e '$!ba' -e "s/<key>CFBundleVersion<\/key>\n\s*<string>[^<]*<\/string>/<key>CFBundleVersion<\/key>\n        <string>{{ needs.bump-version.outputs.VERSION }}<\/string>/g" dist/PTZJoystickControl.app/Contents/Info.plist
+      run: sed -i '' -e ':a' -e 'N' -e '$!ba' -e "s/<key>CFBundleVersion<\/key>\n\s*<string>[^<]*<\/string>/<key>CFBundleVersion<\/key>\n        <string>${{ steps.version.outputs.VERSION }}<\/string>/g" dist/PTZJoystickControl.app/Contents/Info.plist
 
     - name: Create Installer
       run: |
@@ -142,7 +126,7 @@ jobs:
           ${{ env.OutputName }}.dmg \
           dist/PTZJoystickControl.app
       env:
-          OutputName: ${{ format('PTZJoystickControl_v{0}_osx_x64', needs.bump-version.outputs.VERSION) }}
+          OutputName: ${{ format('PTZJoystickControl_v{0}_osx_x64', steps.version.outputs.VERSION) }}
 
     - name: Upload build artifacts (dmg package)
       if: ${{ github.event_name == 'push' }}
@@ -156,5 +140,5 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
           prerelease: true
-          tag_name: v${{ needs.bump-version.outputs.VERSION }}
+          tag_name: v$${{ steps.version.outputs.VERSION }}
           files: "*.dmg"
