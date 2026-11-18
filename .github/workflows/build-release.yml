@@ -38,7 +38,7 @@ jobs:
         "VERSION=$v" >> $env:GITHUB_OUTPUT
 
     - name: Build
-      run: dotnet build PTZJoystickControl.sln -c Release -p:Platform="Any CPU" --no-incremental -p:TreatWarningsAsErrors=false
+      run: dotnet build Gui/Gui.csproj -c Release
 
     - name: Publish application (self-contained)
       run: dotnet publish Gui/Gui.csproj -c PublishRelease -r win-${{ matrix.arch }} --self-contained

@@ -1,9 +1,9 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 	<Fragment>
 		<?if $(sys.BUILDARCH) = "x64"?>
-		<?define BasePath="../../Gui/bin/PublishRelease/net10.0/win-x64/publish/"?>
+		<?define BasePath="$(sys.SOURCEFILEDIR)../../Gui/bin/PublishRelease/net10.0/win-x64/publish/"?>
 		<?elseif $(sys.BUILDARCH) = "x86"?>
-		<?define BasePath="../../Gui/bin/PublishRelease/net10.0/win-x86/publish/"?>
+		<?define BasePath="$(sys.SOURCEFILEDIR)../../Gui/bin/PublishRelease/net10.0/win-x86/publish/"?>
 		<?endif?>
 		<ComponentGroup Id="MainProgram" Directory="INSTALLFOLDER" Source="$(BasePath)">
 			<Component>
