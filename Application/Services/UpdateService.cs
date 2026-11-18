@@ -1,4 +1,4 @@
-﻿using Octokit;
+using Octokit;
 using PtzJoystickControl.Core.Model;
 using PtzJoystickControl.Core.Services;
 using System.Text.RegularExpressions;
@@ -22,10 +22,16 @@ namespace PtzJoystickControl.Application.Services
 
         public async Task<Update> CheckForUpdate()
         {
-            Release latestRelease;
+            IReadOnlyList<Release> releases;
             try
             {
-                latestRelease = await _githubClient.Repository.Release.GetLatest(_owner, _repository);
+                // GetAll (not GetLatest): GetLatest ignores pre-releases, which is what this project publishes.
+                releases = await _githubClient.Repository.Release.GetAll(_owner, _repository, new ApiOptions { PageSize = 30, PageCount = 1 });
+            }
+            catch (NotFoundException)
+            {
+                // Repository without any releases yet: nothing to update to.
+                return new Update();
             }
             catch (Exception e)
             {
@@ -36,25 +42,35 @@ namespace PtzJoystickControl.Application.Services
                 };
             }
 
-            var update = new Update()
+            return Evaluate(
+                releases.Select(r => (r.TagName, r.HtmlUrl, r.Draft)),
+                _currentVersion);
+        }
+
+        /// <summary>Picks the release with the highest version number and compares it with the running version.</summary>
+        public static Update Evaluate(IEnumerable<(string Tag, string Url, bool Draft)> releases, Version currentVersion)
+        {
+            (string Tag, string Url, Version Version)? best = null;
+            foreach (var (tag, url, draft) in releases)
             {
-                Version = latestRelease.TagName,
-                Uri = new Uri(latestRelease.HtmlUrl)
+                if (draft)
+                    continue;
+                var match = Regex.Match(tag ?? "", @"\d+\.\d+\.\d+(\.\d+)?");
+                if (!match.Success || !Version.TryParse(match.Value, out var version))
+                    continue;
+                if (best == null || version > best.Value.Version)
+                    best = (tag!, url, version);
+            }
+
+            if (best == null)
+                return new Update();
+
+            return new Update
+            {
+                Version = best.Value.Tag,
+                Uri = Uri.TryCreate(best.Value.Url, UriKind.Absolute, out var uri) ? uri : null,
+                Available = best.Value.Version > currentVersion,
             };
-
-            var versionMatch = Regex.Match(latestRelease.TagName, @"\d+\.\d+\.\d+(\.\d+)?");
-
-            if (!versionMatch.Success || !Version.TryParse(versionMatch.Value, out Version? latest))
-            {
-                update.Error = true;
-                update.ErrorMessage = "Error parsing version tag";
-            }
-            else if (latest > _currentVersion)
-            {
-                update.Available = true;
-            }
-
-            return update;
         }
     }
 }

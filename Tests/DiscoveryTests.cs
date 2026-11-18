@@ -245,3 +245,48 @@ public class VideoSourceUrlTests
         Assert.Null(VideoSourceUrl.NdiSourceName("rtsp://x/y"));
     }
 }
+
+public class UpdateServiceTests
+{
+    private static readonly Version Current = new(0, 1, 0, 0);
+
+    private static PtzJoystickControl.Core.Model.Update Eval(params (string, string, bool)[] releases) =>
+        PtzJoystickControl.Application.Services.UpdateService.Evaluate(releases, Current);
+
+    [Fact]
+    public void NoReleasesMeansNoUpdateAndNoError()
+    {
+        var update = Eval();
+        Assert.False(update.Available);
+        Assert.False(update.Error);
+    }
+
+    [Fact]
+    public void NewerReleaseIsAvailable()
+    {
+        var update = Eval(("v0.1.0.0", "https://x/a", false), ("v0.2.0.0", "https://x/b", false));
+        Assert.True(update.Available);
+        Assert.Equal("v0.2.0.0", update.Version);
+        Assert.Equal(new Uri("https://x/b"), update.Uri);
+    }
+
+    [Fact]
+    public void SameVersionIsNotAnUpdate() =>
+        Assert.False(Eval(("v0.1.0.0", "https://x/a", false)).Available);
+
+    [Fact]
+    public void OlderUpstreamReleaseIsNotAnUpdate() =>
+        Assert.False(Eval(("v0.0.2.59", "https://x/a", false)).Available);
+
+    [Fact]
+    public void DraftsAndUnparsableTagsAreIgnored()
+    {
+        var update = Eval(("v9.9.9.9", "https://x/draft", true), ("nightly", "https://x/n", false), ("v0.1.1.0", "https://x/ok", false));
+        Assert.Equal("v0.1.1.0", update.Version);
+        Assert.True(update.Available);
+    }
+
+    [Fact]
+    public void ThreePartTagsWork() =>
+        Assert.True(Eval(("v0.2.0", "https://x/a", false)).Available);
+}
