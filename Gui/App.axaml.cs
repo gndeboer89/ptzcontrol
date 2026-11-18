@@ -40,7 +40,7 @@ namespace PtzJoystickControl.Gui
                 mainWindow);
             mainWindow.DataContext = mainWindowViewModel;
 
-            mainWindow.Closing += (object? s, CancelEventArgs e) =>
+            mainWindow.Closing += (object? s, WindowClosingEventArgs e) =>
             {   // Prevent closnig to keep application running in background
                 mainWindow.Hide();
                 e.Cancel = true;
@@ -91,7 +91,7 @@ namespace PtzJoystickControl.Gui
             if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
                 return;
 
-            var mainWindow = desktop.MainWindow;
+            var mainWindow = desktop.MainWindow!;
 
             mainWindow.Show();
             if (mainWindow.WindowState == WindowState.Minimized)
@@ -121,7 +121,7 @@ namespace PtzJoystickControl.Gui
                         var vm = new UpdateDialogViewModel(update);
                         var dialog = new UpdateDialogWindow() { DataContext = vm };
                         ShowMainWindow();
-                        dialog.ShowDialog(desktop.MainWindow);
+                        dialog.ShowDialog(desktop.MainWindow!);
                     };
                     if (Dispatcher.UIThread.CheckAccess())
                         showUpdateModal();

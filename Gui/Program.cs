@@ -40,7 +40,7 @@ internal class Program
         var appBuilder = BuildAvaloniaApp();
 
         // Mutex to ensure only one instance will 
-        var mutex = new Mutex(false, "PTZJoystickControlMutex/BFD0A32E-F433-49E7-AB74-B49FC95012D0");
+        var mutex = new Mutex(false, "PTZJoystickControlMutex_BFD0A32E-F433-49E7-AB74-B49FC95012D0");
         try
         {
             if (!mutex.WaitOne(0, false))
@@ -70,7 +70,6 @@ internal class Program
     {
         var services = Locator.CurrentMutable;
         var resolver = Locator.Current;
-        var avaloniaLocator = AvaloniaLocator.Current;
 
         services.Register<IGitHubClient>(() => new GitHubClient(new ProductHeaderValue("PTZJoystickControl-UpdateChecker")));
         services.Register<IUpdateService>(() => new UpdateService(
@@ -95,20 +94,13 @@ internal class Program
         services.Register(() => new CamerasViewModel(
             resolver.GetServiceOrThrow<ICamerasService>(),
             resolver.GetServiceOrThrow<GamepadsViewModel>()));
-        services.RegisterLazySingleton(() => new TrayIconHandler(
-            avaloniaLocator.GetServiceOrThrow<IAssetLoader>()));
+        services.RegisterLazySingleton(() => new TrayIconHandler());
     }
 }
 
 internal static class ResolverExtension
 {
     internal static T GetServiceOrThrow<T>(this IReadonlyDependencyResolver resolver)
-    {
-        return resolver.GetService<T>()
-            ?? throw new Exception("Resolved dependency cannot be null");
-    }
-
-    internal static T GetServiceOrThrow<T>(this IAvaloniaDependencyResolver resolver)
     {
         return resolver.GetService<T>()
             ?? throw new Exception("Resolved dependency cannot be null");

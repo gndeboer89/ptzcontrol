@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Platform;
@@ -73,7 +73,7 @@ namespace PtzJoystickControl.Gui.TrayIcon
                     writer.Write(PngColorsInPalette);
                     writer.Write(EntryReserved);
                     writer.Write(PngColorPlanes);
-                    writer.Write((ushort)PixelFormat.Rgba8888);
+                    writer.Write((ushort)32);
                     writer.Write((uint)buffer.Length);
                     writer.Write(offset);
 

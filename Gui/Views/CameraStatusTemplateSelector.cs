@@ -10,13 +10,12 @@ public class CameraStatusTemplateSelector : IDataTemplate
     [Content]
     public Dictionary<string, IDataTemplate> Templates { get; } = new();
 
-    public bool SupportsRecycling => false;
 
-    public IControl Build(object param)
+    public Control? Build(object? param)
     {
         IDataTemplate? returnTemplate;
 
-        var connected = (bool)param;
+        var connected = (bool)param!;
 
         if (connected)
             returnTemplate = Templates["true"];
@@ -26,7 +25,7 @@ public class CameraStatusTemplateSelector : IDataTemplate
         return returnTemplate.Build(param);
     }
 
-    public bool Match(object data)
+    public bool Match(object? data)
     {
         return data is bool;
     }

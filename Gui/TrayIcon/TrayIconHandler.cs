@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using Avalonia;
 using Avalonia.Platform;
@@ -13,13 +14,11 @@ namespace PtzJoystickControl.Gui.TrayIcon
 {
     internal class TrayIconHandler
     {
-        private readonly IAssetLoader _assetLoader;
         private readonly string _assemblyName;
         private readonly Avalonia.Controls.TrayIcon _trayIcon;
 
-        public TrayIconHandler(IAssetLoader assetLoader)
+        public TrayIconHandler()
         {
-            _assetLoader = assetLoader ?? throw new ArgumentNullException(nameof(assetLoader));
             _assemblyName = Assembly.GetExecutingAssembly().GetName().Name!;
 
             // Initialize Tray Icon
@@ -37,31 +36,32 @@ namespace PtzJoystickControl.Gui.TrayIcon
 
         public void UpdateIcon(int number)
         {
-            var assets = AvaloniaLocator.Current.GetServiceOrThrow<IAssetLoader>();
-
             int[] sizes = { 16, 24, 32 };
             string text = number > 0 ? number < 100 ? number.ToString() : "##" : "-";
             List<Bitmap> bitmaps = new(sizes.Length);
 
             for (int i = 0; i < sizes.Length; i++)
             {
-                Bitmap bitmap = new(assets.Open(new Uri($"avares://{_assemblyName}/Assets/bg_{sizes[i]}.png")));
+                Bitmap bitmap = new(AssetLoader.Open(new Uri($"avares://{_assemblyName}/Assets/bg_{sizes[i]}.png")));
 
                 using var rtbb = new RenderTargetBitmap(new PixelSize(sizes[i], sizes[i]));
-                using var ctx = rtbb.CreateDrawingContext(null);
+                using var ctx = rtbb.CreateDrawingContext();
                 
-                var brush = new SolidColorBrush(Colors.White);
-                var formattedTextt = new FormattedText(
+                var formattedText = new FormattedText(
                     text,
+                    CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight,
                     new Typeface("Microsoft Sans Serif", FontStyle.Normal, FontWeight.SemiBold),
                     sizes[i] - 4,
-                    TextAlignment.Center,
-                    TextWrapping.NoWrap,
-                    new Size(sizes[i], sizes[i])
-                );
+                    Brushes.White)
+                {
+                    TextAlignment = TextAlignment.Center,
+                    MaxTextWidth = sizes[i],
+                    MaxTextHeight = sizes[i]
+                };
 
-                ctx.DrawBitmap(bitmap.PlatformImpl, 1, new Rect(0, 0, sizes[i], sizes[i]), new Rect(0, 0, sizes[i], sizes[i]));
-                ctx.DrawText(brush, new Point(0, 0), formattedTextt.PlatformImpl);
+                ctx.DrawImage(bitmap, new Rect(0, 0, sizes[i], sizes[i]), new Rect(0, 0, sizes[i], sizes[i]));
+                ctx.DrawText(formattedText, new Point(0, 0));
 
                 using var ms = new MemoryStream();
                 rtbb.Save(ms);

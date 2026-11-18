@@ -6,7 +6,7 @@
 	<AssemblyTitle>PTZ Joystick Control</AssemblyTitle>
 	<AssemblyName>Gui</AssemblyName>
 	<ApplicationIcon>./Assets/icon.ico</ApplicationIcon>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <!--Avalonia doesen't support TrimMode=link currently,but we are working on that https://github.com/AvaloniaUI/Avalonia/issues/6892 -->
     <TrimMode>copyused</TrimMode>
@@ -26,12 +26,13 @@
     <!--<TrimmableAssembly Include="Avalonia.Themes.Default" />-->
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="0.10.19" />
-    <PackageReference Include="Avalonia.Desktop" Version="0.10.19" />
+    <PackageReference Include="Avalonia" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />
     <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
-    <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="0.10.19" />
-    <PackageReference Include="Avalonia.ReactiveUI" Version="0.10.19" />
-    <PackageReference Include="XamlNameReferenceGenerator" Version="1.6.1" />
+    <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="11.3.23" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <PackageReference Include="Avalonia.ReactiveUI" Version="11.3.9" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Application\Application.csproj" />

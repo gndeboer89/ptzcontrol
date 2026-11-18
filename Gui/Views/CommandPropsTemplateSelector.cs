@@ -14,13 +14,12 @@ public class CommandPropsTemplateSelector : IDataTemplate
     [Content]
     public Dictionary<string, IDataTemplate> Templates { get; } = new();
 
-    public bool SupportsRecycling => false;
 
-    public IControl Build(object param)
+    public Control? Build(object? param)
     {
         IDataTemplate? returnTemplate = null;
 
-        var inputViewModel = (InputViewModel)param;
+        var inputViewModel = (InputViewModel)param!;
         if (inputViewModel.SelectedCommand != null)
         {
             if (inputViewModel.InputType == InputType.Axis)
@@ -63,7 +62,7 @@ public class CommandPropsTemplateSelector : IDataTemplate
         return control;
     }
 
-    public bool Match(object data)
+    public bool Match(object? data)
     {
         return data is InputViewModel;
     }

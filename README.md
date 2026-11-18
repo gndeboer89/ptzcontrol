@@ -26,8 +26,17 @@ PTZ Joystick Control simply lets you use any joystick or gamepad to control PTZ 
 
 ## Linux and RaspberryPi support
 The application also runs on Linux, and even a RaspberryPi, however I haven't got to releasing binaries for those yet.
-On x86 and x64 Linux machienes you can build from source using ´dotnet build´, and it should be able to run.
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download). On x86 and x64 Linux machines you can build from source using `dotnet build`, and it should be able to run.
 For linux-ARM devices such as RaspberryPi you additionally need to compile libSDL2 yourself, and add it to the build output for it to run.
+
+## Building
+```bash
+dotnet build
+dotnet run --project Gui
+```
+
+## Fork notice
+This is a fork of [AronHetLam/PTZJoystickControl](https://github.com/AronHetLam/PTZJoystickControl), modernized to .NET 10 and Avalonia 11.
 
 ## License
 This project is licensed under the GPL-3 License - see the LICENSE.txt file for details.
