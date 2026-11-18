@@ -1,0 +1,19 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+	<Fragment>
+		<?if $(sys.BUILDARCH) = "x64"?>
+		<?define BasePath="$(sys.SOURCEFILEDIR)../../Gui/bin/PublishRelease/net10.0/win-x64/publish/"?>
+		<?elseif $(sys.BUILDARCH) = "x86"?>
+		<?define BasePath="$(sys.SOURCEFILEDIR)../../Gui/bin/PublishRelease/net10.0/win-x86/publish/"?>
+		<?endif?>
+		<ComponentGroup Id="MainProgram" Directory="INSTALLFOLDER" Source="$(BasePath)">
+			<Component>
+				<File Name="Gui.exe" Id="MainExe" />
+			</Component>
+			<!-- Include everything the publish step produced, so the installer can't drift from the .NET runtime's file list. -->
+			<Files Include="$(BasePath)**">
+				<Exclude Files="$(BasePath)Gui.exe" />
+				<Exclude Files="$(BasePath)**/*.pdb" />
+			</Files>
+		</ComponentGroup>
+	</Fragment>
+</Wix>

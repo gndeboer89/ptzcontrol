@@ -1,0 +1,170 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main", "claude/**" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a GitHub release with this tag (e.g. v0.1.0). Leave empty to only build.'
+        required: false
+        type: string
+
+env:
+  DOTNET_NOLOGO: true
+
+jobs:
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Read version
+      id: version
+      shell: pwsh
+      run: |
+        $v = ([xml](Get-Content Gui/Gui.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        Write-Output "Version: $v"
+        "VERSION=$v" >> $env:GITHUB_OUTPUT
+
+    - name: Build
+      run: dotnet build Gui/Gui.csproj -c Release
+
+    - name: Run tests
+      run: dotnet test Tests/Tests.csproj -c Release
+
+    - name: Publish application (self-contained)
+      run: dotnet publish Gui/Gui.csproj -c PublishRelease -r win-${{ matrix.arch }} --self-contained
+
+    - name: Create portable zip
+      shell: pwsh
+      run: |
+        $name = "PTZJoystickControl_v${{ steps.version.outputs.VERSION }}_win_${{ matrix.arch }}_portable"
+        Compress-Archive -Path "Gui/bin/PublishRelease/net10.0/win-${{ matrix.arch }}/publish/*" -DestinationPath "$name.zip"
+
+    - name: Create msi package
+      run: dotnet build Packaging/Windows/Windows.wixproj -c PublishRelease -p:OutputName=${{ format('PTZJoystickControl_v{0}_win_{1}', steps.version.outputs.VERSION, matrix.arch) }} -o Packaging/Windows/Packages -p:platform=${{ matrix.arch }}
+
+    - name: Smoke test (published exe starts and stays up)
+      shell: pwsh
+      run: |
+        $p = Start-Process "Gui/bin/PublishRelease/net10.0/win-${{ matrix.arch }}/publish/Gui.exe" -PassThru
+        Start-Sleep -Seconds 10
+        if ($p.HasExited) { throw "Gui.exe exited early with code $($p.ExitCode)" }
+        Stop-Process $p
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-${{ matrix.arch }}
+        path: |
+          Packaging/Windows/Packages/**/*.msi
+          *.zip
+
+  release:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download Windows packages
+      uses: actions/download-artifact@v4
+      with:
+        pattern: windows-*
+        path: artifacts
+
+    - name: GH Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ inputs.release_tag || github.ref_name }}
+        target_commitish: ${{ github.sha }}
+        name: PTZ Joystick Control ${{ inputs.release_tag || github.ref_name }}
+        prerelease: true
+        generate_release_notes: true
+        files: |
+          artifacts/**/*.msi
+          artifacts/**/*.zip
+
+  build-macos-packeges:
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+
+    steps:    
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Read version
+      id: version
+      run: echo "VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Gui/Gui.csproj | head -1)" >> $GITHUB_OUTPUT
+
+    - name: Build
+      run: dotnet publish Gui/Gui.csproj -c PublishRelease -r osx-x64 --self-contained #/p:PublishSingleFile=true /p:PublishTrimmed=true
+
+    - name: Install Dependencies
+      run: |
+        brew install create-dmg
+
+    - name: Copy Files into app structure
+      run: |
+        mkdir -p dist/PTZJoystickControl.app/Contents/MacOS
+        mkdir -p dist/PTZJoystickControl.app/Contents/Resources
+        cp Gui/bin/PublishRelease/net10.0/osx-x64/publish/* dist/PTZJoystickControl.app/Contents/MacOS
+        cp Packaging/Mac/icon.icns dist/PTZJoystickControl.app/Contents/Resources/
+        cp Packaging/Mac/Info.plist dist/PTZJoystickControl.app/Contents/
+
+    - name: Update Info.plist version
+      run: sed -i '' -e ':a' -e 'N' -e '$!ba' -e "s/<key>CFBundleVersion<\/key>\n\s*<string>[^<]*<\/string>/<key>CFBundleVersion<\/key>\n        <string>${{ steps.version.outputs.VERSION }}<\/string>/g" dist/PTZJoystickControl.app/Contents/Info.plist
+
+    - name: Create Installer
+      run: |
+        create-dmg \
+          --volname "PTZJoystickControl.app" \
+          --volicon "dist/PTZJoystickControl.app/Contents/Resources/icon.icns" \
+          --window-pos 200 120 \
+          --window-size 800 400 \
+          --icon-size 100 \
+          --icon "dist/PTZJoystickControl.app/Contents/Resources/icon.icns" 200 190 \
+          --hide-extension "PTZJoystickControl.app" \
+          --app-drop-link 600 185 \
+          ${{ env.OutputName }}.dmg \
+          dist/PTZJoystickControl.app
+      env:
+          OutputName: ${{ format('PTZJoystickControl_v{0}_osx_x64', steps.version.outputs.VERSION) }}
+
+    - name: Upload build artifacts (dmg package)
+      if: ${{ github.event_name == 'push' }}
+      uses: actions/upload-artifact@v4
+      with:
+          name: DMG Package
+          path: "*.dmg"
+
+    - name: GH Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+          prerelease: true
+          files: "*.dmg"

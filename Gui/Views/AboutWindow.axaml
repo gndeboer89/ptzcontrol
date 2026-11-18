@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:PtzJoystickControl.Gui.ViewModels"
+        x:Class="PtzJoystickControl.Gui.Views.AboutWindow"
+        x:DataType="vm:AboutViewModel"
+        Width="470" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/icon.ico"
+        Title="About PTZ Joystick Control">
+
+	<Window.Styles>
+		<Style Selector="Button.link">
+			<Setter Property="Background" Value="Transparent"/>
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Padding" Value="0"/>
+			<Setter Property="Foreground" Value="#6CB6FF"/>
+			<Setter Property="Cursor" Value="Hand"/>
+		</Style>
+		<Style Selector="Button.link:pointerover /template/ ContentPresenter">
+			<Setter Property="Background" Value="Transparent"/>
+			<Setter Property="TextBlock.TextDecorations" Value="Underline"/>
+		</Style>
+	</Window.Styles>
+
+	<StackPanel Margin="20" Spacing="12">
+		<StackPanel Orientation="Horizontal" Spacing="12">
+			<Image Source="/Assets/icon.ico" Height="48" Width="48"/>
+			<StackPanel VerticalAlignment="Center">
+				<TextBlock Text="{Binding AppName}" FontSize="20" FontWeight="SemiBold"/>
+				<TextBlock Text="{Binding Version}" Opacity="0.7"/>
+			</StackPanel>
+		</StackPanel>
+
+		<StackPanel Spacing="2">
+			<TextBlock Text="{Binding ForkText}" TextWrapping="Wrap"/>
+			<Button Classes="link" Content="{Binding ForkLink}" Command="{Binding OpenLinkCommand}" CommandParameter="{Binding ForkLink}"/>
+		</StackPanel>
+
+		<StackPanel Spacing="2">
+			<TextBlock Text="{Binding OriginalText}" TextWrapping="Wrap"/>
+			<Button Classes="link" Content="{Binding OriginalLink}" Command="{Binding OpenLinkCommand}" CommandParameter="{Binding OriginalLink}"/>
+		</StackPanel>
+
+		<StackPanel Spacing="2">
+			<TextBlock Text="{Binding LicenseText}" TextWrapping="Wrap" Opacity="0.85"/>
+			<Button Classes="link" Content="{Binding LicenseLink}" Command="{Binding OpenLinkCommand}" CommandParameter="{Binding LicenseLink}"/>
+		</StackPanel>
+
+		<TextBlock Text="{Binding ThirdPartyText}" TextWrapping="Wrap" Opacity="0.6" FontSize="11"/>
+
+		<Button Content="Close" HorizontalAlignment="Right" Click="OnCloseClicked" MinWidth="80" HorizontalContentAlignment="Center"/>
+	</StackPanel>
+</Window>

@@ -1,0 +1,25 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="clr-namespace:LibVLCSharp.Avalonia;assembly=LibVLCSharp.Avalonia"
+        xmlns:vm="using:PtzJoystickControl.Gui.ViewModels"
+        x:Class="PtzJoystickControl.Gui.Views.VideoWindow"
+        x:DataType="vm:VideoViewModel"
+        Width="960" Height="600" MinWidth="320" MinHeight="240"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/icon.ico"
+        Title="Video">
+
+	<Grid RowDefinitions="*,Auto" Background="Black">
+		<vlc:VideoView Grid.Row="0" MediaPlayer="{Binding MediaPlayer}"/>
+
+		<Border Grid.Row="1" Background="#202020" Padding="8,5">
+			<Grid ColumnDefinitions="*,Auto">
+				<StackPanel Grid.Column="0" VerticalAlignment="Center">
+					<TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+					<TextBlock Text="{Binding UrlForDisplay}" FontSize="11" Opacity="0.6" TextTrimming="CharacterEllipsis"/>
+				</StackPanel>
+				<Button Grid.Column="1" Content="Reconnect" Command="{Binding ReconnectCommand}" Margin="8,0,0,0"/>
+			</Grid>
+		</Border>
+	</Grid>
+</Window>
