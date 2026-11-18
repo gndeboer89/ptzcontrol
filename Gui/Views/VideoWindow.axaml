@@ -1,6 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vlc="clr-namespace:LibVLCSharp.Avalonia;assembly=LibVLCSharp.Avalonia"
+        xmlns:v="using:PtzJoystickControl.Gui.Views"
         xmlns:vm="using:PtzJoystickControl.Gui.ViewModels"
         x:Class="PtzJoystickControl.Gui.Views.VideoWindow"
         x:DataType="vm:VideoViewModel"
@@ -10,7 +10,7 @@
         Title="Video">
 
 	<Grid RowDefinitions="*,Auto" Background="Black">
-		<vlc:VideoView Grid.Row="0" MediaPlayer="{Binding MediaPlayer}"/>
+		<v:VideoSurface Grid.Row="0"/>
 
 		<Border Grid.Row="1" Background="#202020" Padding="8,5">
 			<Grid ColumnDefinitions="*,Auto">

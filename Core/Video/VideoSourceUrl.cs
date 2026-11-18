@@ -34,6 +34,9 @@ public static class VideoSourceUrl
             : VideoSourceKind.Invalid;
     }
 
+    /// <summary>Builds an <c>ndi://</c> URL from an NDI source name such as "STUDIO-PC (Camera 1)".</summary>
+    public static string NdiUrl(string sourceName) => "ndi://" + sourceName.Trim().Replace("%", "%25");
+
     /// <summary>The NDI source name from an <c>ndi://Name</c> URL, or null for other kinds.</summary>
     public static string? NdiSourceName(string? url)
     {

@@ -35,6 +35,13 @@ dotnet build
 dotnet run --project Gui
 ```
 
+## Video, multiview and NDI
+- Put an RTSP address (for example `rtsp://192.168.1.10:554/stream1`) in the video field of a camera and press **Video**. Every video opens in its own window, so the main window stays usable.
+- **Multiview** shows the video of all cameras that have a video address, side by side. Click a picture to select that camera for the joystick.
+- **NDI** sources are supported too: press **NDI...** next to the video field and pick a source. This needs the free [NDI Tools / Runtime](https://ndi.video/tools/) installed on the computer; it is not included with this program.
+
+NDI® is a registered trademark of Vizrt Group.
+
 ## Fork notice
 This is a fork of [AronHetLam/PTZJoystickControl](https://github.com/AronHetLam/PTZJoystickControl), modernized to .NET 10 and Avalonia 11.
 

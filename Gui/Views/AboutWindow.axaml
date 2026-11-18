@@ -47,6 +47,7 @@
 		</StackPanel>
 
 		<TextBlock Text="{Binding ThirdPartyText}" TextWrapping="Wrap" Opacity="0.6" FontSize="11"/>
+		<TextBlock Text="{Binding NdiText}" TextWrapping="Wrap" Opacity="0.6" FontSize="11"/>
 
 		<Button Content="Close" HorizontalAlignment="Right" Click="OnCloseClicked" MinWidth="80" HorizontalContentAlignment="Center"/>
 	</StackPanel>

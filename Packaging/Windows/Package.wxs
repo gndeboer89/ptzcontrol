@@ -1,12 +1,13 @@
-﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 	<?if $(sys.BUILDARCH) = "x64"?>
 	<?define UpgradeCode="6CB6A6F0-DF63-4F25-A986-8DB0925A9F21"?>
 	<?elseif $(sys.BUILDARCH) = "x86"?>
 	<?define UpgradeCode="6CB6A6F0-DF63-4F25-A986-8DB0925A9F21"?>
 	<?endif?>
 
-	<Package Name="PTZ Joystick Control" Manufacturer="AHL" Version="!(bind.FileVersion.MainExe)" UpgradeCode="$(var.UpgradeCode)">
-		<MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)"  />
+	<Package Name="PTZ Joystick Control" Manufacturer="Geert de Boer" Version="!(bind.FileVersion.MainExe)" UpgradeCode="$(var.UpgradeCode)">
+		<!-- AllowSameVersionUpgrades: reinstalling the same version replaces the old install instead of adding a second entry. -->
+		<MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" AllowSameVersionUpgrades="yes" />
 		<MediaTemplate EmbedCab="yes"/>
 		<Icon Id="icon.ico" SourceFile="../../Gui/Assets/icon.ico"/>
 		<Property Id="ARPPRODUCTICON" Value="icon.ico" />

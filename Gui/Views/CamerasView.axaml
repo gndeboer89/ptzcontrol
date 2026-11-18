@@ -35,6 +35,7 @@
 		<StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" Margin="10" VerticalAlignment="Bottom">
 			<Button Content="Add" HorizontalContentAlignment="Center" Width="75" Command="{Binding AddCamera}"/>
 			<Button Content="Find cameras..." HorizontalContentAlignment="Center" Click="OnFindCamerasClicked" ToolTip.Tip="Search the network for PTZ cameras (ONVIF and VISCA)"/>
+			<Button Content="Multiview" HorizontalContentAlignment="Center" Click="OnMultiviewClicked" ToolTip.Tip="Show the video of all cameras side by side"/>
 		</StackPanel>
 	</Grid>
 </UserControl>

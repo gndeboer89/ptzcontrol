@@ -24,6 +24,19 @@ namespace PtzJoystickControl.Gui.Views
                 window.Show();
         }
 
+        private void OnMultiviewClicked(object? sender, RoutedEventArgs e)
+        {
+            if (DataContext is not CamerasViewModel viewModel)
+                return;
+
+            var window = new MultiviewWindow { DataContext = viewModel.CreateMultiviewViewModel() };
+            // Not modal, so the camera list and joystick settings stay usable next to it.
+            if (TopLevel.GetTopLevel(this) is Window owner)
+                window.Show(owner);
+            else
+                window.Show();
+        }
+
         private void InitializeComponent()
         {
             AvaloniaXamlLoader.Load(this);

@@ -37,6 +37,8 @@ public class AboutViewModel : ViewModelBase
     public string ThirdPartyText =>
         "Built with Avalonia UI, ReactiveUI, SDL2, Octokit and VLC (libVLC, LGPL).";
 
+    public string NdiText => "NDI® is a registered trademark of Vizrt Group. NDI video needs the free NDI Runtime from ndi.video.";
+
     public ReactiveCommand<string, Unit> OpenLinkCommand { get; }
 
     private static void OpenLink(string url)
