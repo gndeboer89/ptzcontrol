@@ -92,12 +92,16 @@ namespace PtzJoystickControl.Gui.TrayIcon
             var upadteCheckItem = new NativeMenuItem("Check for updates");
             upadteCheckItem.Click += (object? s, EventArgs e) => OnUpdateCheckClicked?.Invoke(s, e);
 
+            var aboutItem = new NativeMenuItem("About");
+            aboutItem.Click += (object? s, EventArgs e) => OnAboutClicked?.Invoke(s, e);
+
             var quitItem = new NativeMenuItem("Quit");
             quitItem.Click += (object? s , EventArgs e) => OnQuitClicked?.Invoke(s, e);
 
             return new NativeMenu{
                 headerItem,
                 upadteCheckItem,
+                aboutItem,
                 new NativeMenuItemSeparator(),
                 quitItem
             };
@@ -105,6 +109,7 @@ namespace PtzJoystickControl.Gui.TrayIcon
 
         public event EventHandler? OnShowClicked;
         public event EventHandler? OnUpdateCheckClicked;
+        public event EventHandler? OnAboutClicked;
         public event EventHandler? OnQuitClicked;
     }
 }

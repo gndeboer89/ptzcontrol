@@ -48,6 +48,11 @@ namespace PtzJoystickControl.Gui
 
             var trayIconHandler = Locator.Current.GetServiceOrThrow<TrayIconHandler>();
             trayIconHandler.OnShowClicked += (object? s, EventArgs e) => ShowMainWindow();
+            trayIconHandler.OnAboutClicked += (object? s, EventArgs e) =>
+            {
+                ShowMainWindow();
+                new AboutWindow().ShowDialog(desktop.MainWindow!);
+            };
             trayIconHandler.OnUpdateCheckClicked += (object? s, EventArgs e) => CheckForUpdate(true);
             trayIconHandler.OnQuitClicked += (object? s, EventArgs e) => desktop.Shutdown();
 

@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 
 namespace PtzJoystickControl.Gui.Views
 {
@@ -11,6 +12,11 @@ namespace PtzJoystickControl.Gui.Views
             //var logWin = new LogWindow();
             //logWin.DataContext = new LogWindowViewModel();
             //logWin.Show();
+        }
+
+        private async void OnAboutClicked(object? sender, RoutedEventArgs e)
+        {
+            await new AboutWindow().ShowDialog(this);
         }
     }
 }
