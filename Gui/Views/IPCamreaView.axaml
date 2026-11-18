@@ -11,7 +11,7 @@
 		<v:CameraViewToCameraConverter x:Key="CameraViewToCameraConverter"/>
 	</UserControl.Resources>
 	
-	<Grid RowDefinitions="Auto,Auto" ColumnDefinitions="100,3,100,3,65,3,70,3,50,0,50,3,95,3,Auto">
+	<Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="100,3,100,3,65,3,70,3,50,0,50,3,95,3,Auto">
 		<Grid.Styles>
 			<Style Selector="Label">
 				<Setter Property="FontSize" Value="11"/>
@@ -33,6 +33,10 @@
 		<CheckBox	Grid.Column="8"  Grid.Row="1" IsChecked="{Binding UseHeader}" HorizontalAlignment="Center"/>
 		<Label		Grid.Column="10" Grid.Row="0">Interval</Label>
 		<TextBox	Grid.Column="10" Grid.Row="1" Text="{Binding SendWaitTime}" MinWidth ="0"/>
+		<Grid Grid.Column="0" Grid.ColumnSpan="13" Grid.Row="2" ColumnDefinitions="*,5,Auto" Margin="0,4,0,0">
+			<TextBox Grid.Column="0" Text="{Binding VideoUrl}" Watermark="Video URL, e.g. rtsp://user:pass@192.168.1.10:554/stream1" ToolTip.Tip="RTSP address of the camera's video stream"/>
+			<Button Grid.Column="2" Content="Video" Click="OnVideoClicked" ToolTip.Tip="Open the live video of this camera"/>
+		</Grid>
 		<Label		Grid.Column="12" Grid.Row="0">Status</Label>
 		<ContentControl Grid.Column="12" Grid.Row="1" Content="{Binding Connected}">
 			<ContentControl.Styles>
@@ -52,7 +56,7 @@
 				</v:CameraStatusTemplateSelector>
 			</ContentControl.DataTemplates>
 		</ContentControl>
-		<Button Grid.Column="14" Grid.Row="0" Grid.RowSpan="2" Background="#3000" Command="{Binding $parent[3].DataContext.RemoveCamera}" CommandParameter="{Binding Converter={StaticResource CameraViewToCameraConverter}}" ToolTip.Tip="Remove Camera">
+		<Button Grid.Column="14" Grid.Row="0" Grid.RowSpan="3" Background="#3000" Command="{Binding $parent[3].DataContext.RemoveCamera}" CommandParameter="{Binding Converter={StaticResource CameraViewToCameraConverter}}" ToolTip.Tip="Remove Camera">
 			<Button.Styles>
 				<Style Selector="Button:pointerover">
 					<Setter Property="Foreground" Value="red"/>

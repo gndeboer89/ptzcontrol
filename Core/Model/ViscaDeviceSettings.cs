@@ -1,4 +1,4 @@
-﻿using PtzJoystickControl.Core.Devices;
+using PtzJoystickControl.Core.Devices;
 
 namespace PtzJoystickControl.Core.Model;
 
@@ -12,6 +12,7 @@ public class ViscaDeviceSettings
     public int SendWaitTime { get; set; }
     public bool UseHeader { get; set; }
     public bool SingleCommand { get; set; }
+    public string? VideoUrl { get; set; }
 
     public ViscaDeviceSettings() { }
 
@@ -27,6 +28,7 @@ public class ViscaDeviceSettings
             SendWaitTime = viscaIPDevice.SendWaitTime;
             UseHeader = viscaIPDevice.UseHeader;
             SingleCommand = viscaIPDevice.SingleCommand;
+            VideoUrl = viscaIPDevice.VideoUrl;
         }
     }
 }

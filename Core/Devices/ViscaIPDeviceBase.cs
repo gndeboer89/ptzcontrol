@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 
@@ -18,6 +18,24 @@ public abstract class ViscaIPDeviceBase : ViscaDeviceBase
     {
         Name = name;
         ViscaIpEndpont = viscaEndpint ?? new IPEndPoint(System.Net.IPAddress.Any, 5678);
+    }
+
+    private string? videoUrl;
+
+    /// <summary>Where to find this camera's video: an rtsp:// URL, or ndi://SourceName.</summary>
+    public string? VideoUrl
+    {
+        get => videoUrl;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (videoUrl != normalized)
+            {
+                videoUrl = normalized;
+                NotifyPropertyChanged();
+                NotifyPersistentPropertyChanged();
+            }
+        }
     }
 
     public int remotePacketId { get; set; }

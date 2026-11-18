@@ -1,4 +1,4 @@
-﻿using Avalonia.Data;
+using Avalonia.Data;
 using Avalonia.Utilities;
 using PtzJoystickControl.Core.Devices;
 using System;
@@ -102,6 +102,12 @@ public class IPCameraViewModel : ViewModelBase, INotifyPropertyChanged
                 throw new DataValidationException("1-65535");
             }
         }
+    }
+
+    public string? VideoUrl
+    {
+        get => _camera.VideoUrl;
+        set => _camera.VideoUrl = value;
     }
 
     public bool Connected { get => _camera.Connected; }

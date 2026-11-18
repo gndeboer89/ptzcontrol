@@ -3,6 +3,7 @@ using System.Text;
 using PtzJoystickControl.Application.Discovery;
 using PtzJoystickControl.Core.Devices;
 using PtzJoystickControl.Core.Discovery;
+using PtzJoystickControl.Core.Video;
 using Xunit;
 
 namespace PtzJoystickControl.Tests;
@@ -205,5 +206,42 @@ public class CameraDiscoveryServiceTests
         await service.DiscoverAsync(null, cts.Token);
 
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), $"took {sw.Elapsed}");
+    }
+}
+
+public class VideoSourceUrlTests
+{
+    [Theory]
+    [InlineData(null, VideoSourceKind.None)]
+    [InlineData("", VideoSourceKind.None)]
+    [InlineData("   ", VideoSourceKind.None)]
+    [InlineData("rtsp://192.168.1.10:554/stream1", VideoSourceKind.Rtsp)]
+    [InlineData("RTSP://user:pw@cam.local/live", VideoSourceKind.Rtsp)]
+    [InlineData("  rtsp://10.0.0.1/x  ", VideoSourceKind.Rtsp)]
+    [InlineData("ndi://STUDIO-PC (Camera 1)", VideoSourceKind.Ndi)]
+    [InlineData("ndi://", VideoSourceKind.Invalid)]
+    [InlineData("http://10.0.0.1/stream.m3u8", VideoSourceKind.Other)]
+    [InlineData("srt://10.0.0.1:9000", VideoSourceKind.Other)]
+    [InlineData("rtsp://", VideoSourceKind.Invalid)]
+    [InlineData("192.168.1.10", VideoSourceKind.Invalid)]
+    [InlineData("ftp://10.0.0.1/x", VideoSourceKind.Invalid)]
+    [InlineData("file:///etc/passwd", VideoSourceKind.Invalid)]
+    public void ClassifiesUrls(string? url, VideoSourceKind expected) =>
+        Assert.Equal(expected, VideoSourceUrl.Classify(url));
+
+    [Theory]
+    [InlineData("rtsp://admin:secret@192.168.1.10:554/stream1", "rtsp://192.168.1.10:554/stream1")]
+    [InlineData("rtsp://admin:p@ss@cam/live", "rtsp://cam/live")]
+    [InlineData("rtsp://192.168.1.10/stream1", "rtsp://192.168.1.10/stream1")]
+    [InlineData("rtsp://cam/path@notcreds", "rtsp://cam/path@notcreds")]
+    [InlineData(null, "")]
+    public void RedactsCredentials(string? url, string expected) =>
+        Assert.Equal(expected, VideoSourceUrl.RedactCredentials(url));
+
+    [Fact]
+    public void ExtractsNdiSourceName()
+    {
+        Assert.Equal("STUDIO-PC (Camera 1)", VideoSourceUrl.NdiSourceName("ndi://STUDIO-PC%20(Camera%201)"));
+        Assert.Null(VideoSourceUrl.NdiSourceName("rtsp://x/y"));
     }
 }

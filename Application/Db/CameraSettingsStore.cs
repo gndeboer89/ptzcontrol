@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using PtzJoystickControl.Core.Devices;
 using System.Diagnostics;
 using PtzJoystickControl.Core.Db;
@@ -46,6 +46,7 @@ namespace PtzJoystickControl.Application.Db
                             viscaIPDevice.Protocol = viscaDeviceSettings.Protocol;
                             viscaIPDevice.SendWaitTime = viscaDeviceSettings.SendWaitTime;
                             viscaIPDevice.UseHeader = viscaDeviceSettings.UseHeader;
+                            viscaIPDevice.VideoUrl = viscaDeviceSettings.VideoUrl;
                         }
                         return viscaDevice;
                     })
