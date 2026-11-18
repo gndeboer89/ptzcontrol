@@ -5,7 +5,9 @@ using PtzJoystickControl.Gui.ViewModels;
 using PtzJoystickControl.Gui.TrayIcon;
 using PtzJoystickControl.Application.Db;
 using PtzJoystickControl.Application.Services;
+using PtzJoystickControl.Application.Discovery;
 using PtzJoystickControl.Core.Db;
+using PtzJoystickControl.Core.Discovery;
 using PtzJoystickControl.Core.Services;
 using PtzJoystickControl.SdlGamepads.Services;
 using Splat;
@@ -81,6 +83,7 @@ internal class Program
         services.RegisterConstant<ICameraSettingsStore>(new CameraSettingsStore());
         services.RegisterConstant<IGamepadSettingsStore>(new GamepadSettingsStore());
 
+        services.RegisterConstant<ICameraDiscoveryService>(new CameraDiscoveryService());
         services.RegisterConstant<ICommandsService>(new CommandsService());
         services.RegisterConstant<ICamerasService>(new CamerasService(
             resolver.GetServiceOrThrow<ICameraSettingsStore>()));
@@ -93,7 +96,8 @@ internal class Program
             resolver.GetServiceOrThrow<IGamepadsService>()));
         services.Register(() => new CamerasViewModel(
             resolver.GetServiceOrThrow<ICamerasService>(),
-            resolver.GetServiceOrThrow<GamepadsViewModel>()));
+            resolver.GetServiceOrThrow<GamepadsViewModel>(),
+            resolver.GetServiceOrThrow<ICameraDiscoveryService>()));
         services.RegisterLazySingleton(() => new TrayIconHandler());
     }
 }

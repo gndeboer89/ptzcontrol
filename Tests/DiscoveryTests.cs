@@ -1,0 +1,209 @@
+using System.Net;
+using System.Text;
+using PtzJoystickControl.Application.Discovery;
+using PtzJoystickControl.Core.Devices;
+using PtzJoystickControl.Core.Discovery;
+using Xunit;
+
+namespace PtzJoystickControl.Tests;
+
+public class WsDiscoveryTests
+{
+    private const string ProbeMatchXml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope"
+            xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing"
+            xmlns:wsdd="http://schemas.xmlsoap.org/ws/2005/04/discovery">
+          <SOAP-ENV:Body>
+            <wsdd:ProbeMatches>
+              <wsdd:ProbeMatch>
+                <wsa:EndpointReference><wsa:Address>urn:uuid:abc</wsa:Address></wsa:EndpointReference>
+                <wsdd:Types>dn:NetworkVideoTransmitter</wsdd:Types>
+                <wsdd:Scopes>onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/name/PTZ%20Cam%201 onvif://www.onvif.org/hardware/ABC-123 onvif://www.onvif.org/location/city/x</wsdd:Scopes>
+                <wsdd:XAddrs>http://[fe80::1]/onvif/device_service http://192.168.1.50:8080/onvif/device_service</wsdd:XAddrs>
+                <wsdd:MetadataVersion>1</wsdd:MetadataVersion>
+              </wsdd:ProbeMatch>
+            </wsdd:ProbeMatches>
+          </SOAP-ENV:Body>
+        </SOAP-ENV:Envelope>
+        """;
+
+    private static DiscoveredCamera? Parse(string xml, IPAddress? sender = null)
+    {
+        var bytes = Encoding.UTF8.GetBytes(xml);
+        return WsDiscovery.ParseProbeMatch(bytes, bytes.Length, sender);
+    }
+
+    [Fact]
+    public void ParsesAddressNameAndHardware()
+    {
+        var camera = Parse(ProbeMatchXml);
+
+        Assert.NotNull(camera);
+        Assert.Equal(IPAddress.Parse("192.168.1.50"), camera.Address);
+        Assert.Equal("PTZ Cam 1", camera.Name);
+        Assert.Equal("ABC-123", camera.Hardware);
+        Assert.Equal(new Uri("http://192.168.1.50:8080/onvif/device_service"), camera.OnvifServiceUri);
+        Assert.Equal(DiscoverySource.Onvif, camera.Source);
+    }
+
+    [Fact]
+    public void FallsBackToSenderWhenNoIPv4XAddr()
+    {
+        var xml = ProbeMatchXml.Replace("http://192.168.1.50:8080/onvif/device_service", "http://cam.local/onvif");
+        var camera = Parse(xml, IPAddress.Parse("10.0.0.7"));
+
+        Assert.NotNull(camera);
+        Assert.Equal(IPAddress.Parse("10.0.0.7"), camera.Address);
+    }
+
+    [Fact]
+    public void ReturnsNullWhenNoAddressCanBeDetermined()
+    {
+        var xml = ProbeMatchXml.Replace("http://192.168.1.50:8080/onvif/device_service", "http://cam.local/onvif");
+        Assert.Null(Parse(xml));
+    }
+
+    [Theory]
+    [InlineData("not xml at all")]
+    [InlineData("<a><b/></a>")]
+    [InlineData("")]
+    public void IgnoresGarbage(string input) => Assert.Null(Parse(input, IPAddress.Loopback));
+
+    [Fact]
+    public void RejectsDtdToAvoidXmlAttacks()
+    {
+        var xml = "<!DOCTYPE x [<!ENTITY e \"boom\">]>" + ProbeMatchXml;
+        Assert.Null(Parse(xml, IPAddress.Loopback));
+    }
+
+    [Fact]
+    public void ProbeContainsOnvifTypeAndUniqueId()
+    {
+        var id = Guid.NewGuid();
+        var probe = WsDiscovery.BuildProbe(id);
+
+        Assert.Contains("dn:NetworkVideoTransmitter", probe);
+        Assert.Contains($"uuid:{id}", probe);
+        // Must be well-formed XML.
+        System.Xml.Linq.XDocument.Parse(probe);
+    }
+}
+
+public class ViscaProbeTests
+{
+    [Fact]
+    public void HeaderlessInquiryIsRawViscaCommand() =>
+        Assert.Equal(new byte[] { 0x81, 0x09, 0x04, 0x00, 0xFF }, ViscaProbe.BuildInquiry(false));
+
+    [Fact]
+    public void HeaderedInquiryHasSonnyHeader()
+    {
+        var packet = ViscaProbe.BuildInquiry(true, 0x01020304);
+
+        Assert.Equal(new byte[] { 0x01, 0x10, 0x00, 0x05, 0x01, 0x02, 0x03, 0x04, 0x81, 0x09, 0x04, 0x00, 0xFF }, packet);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x90, 0x50, 0x02, 0xFF }, true)]                                                  // completion, no header
+    [InlineData(new byte[] { 0x90, 0x41, 0xFF }, true)]                                                        // ack, no header
+    [InlineData(new byte[] { 0x01, 0x11, 0x00, 0x03, 0, 0, 0, 1, 0x90, 0x50, 0xFF }, true)]                    // reply with header
+    [InlineData(new byte[] { 0x48, 0x54, 0x54, 0x50, 0x2F, 0x31 }, false)]                                     // "HTTP/1"
+    [InlineData(new byte[] { 0x90 }, false)]
+    [InlineData(new byte[] { }, false)]
+    public void RecognisesViscaReplies(byte[] data, bool expected) =>
+        Assert.Equal(expected, ViscaProbe.IsViscaReply(data, data.Length));
+}
+
+public class SubnetEnumeratorTests
+{
+    [Fact]
+    public void Slash24ListsAll253OtherHosts()
+    {
+        var hosts = SubnetEnumerator.Hosts(IPAddress.Parse("192.168.1.20"), 24).ToList();
+
+        Assert.Equal(253, hosts.Count);
+        Assert.DoesNotContain(IPAddress.Parse("192.168.1.20"), hosts);
+        Assert.DoesNotContain(IPAddress.Parse("192.168.1.0"), hosts);
+        Assert.DoesNotContain(IPAddress.Parse("192.168.1.255"), hosts);
+        Assert.Contains(IPAddress.Parse("192.168.1.1"), hosts);
+        Assert.Contains(IPAddress.Parse("192.168.1.254"), hosts);
+    }
+
+    [Fact]
+    public void LargeNetworksAreLimitedToSlash22AroundLocalAddress()
+    {
+        var hosts = SubnetEnumerator.Hosts(IPAddress.Parse("10.1.130.5"), 8).ToList();
+
+        Assert.Equal(1021, hosts.Count);
+        Assert.All(hosts, h => Assert.InRange(h.GetAddressBytes()[2], 128, 131));
+    }
+
+    [Theory]
+    [InlineData(31)]
+    [InlineData(32)]
+    [InlineData(0)]
+    public void NoHostsForUnusablePrefix(int prefix) =>
+        Assert.Empty(SubnetEnumerator.Hosts(IPAddress.Parse("192.168.1.20"), prefix));
+}
+
+public class DiscoveredCameraTests
+{
+    private static readonly IPAddress Ip = IPAddress.Parse("192.168.1.9");
+
+    [Fact]
+    public void MergeCombinesOnvifNameWithViscaPort()
+    {
+        var onvif = new DiscoveredCamera(Ip) { Name = "Front", Source = DiscoverySource.Onvif, OnvifServiceUri = new Uri("http://192.168.1.9/onvif") };
+        var visca = ViscaProbe.ToCamera(Ip, new ViscaProbeTarget(52381, true));
+
+        var merged = onvif.Merge(visca);
+
+        Assert.Equal("Front", merged.Name);
+        Assert.Equal(52381, merged.ViscaPort);
+        Assert.Equal(Protocol.Udp, merged.ViscaProtocol);
+        Assert.True(merged.ViscaUseHeader);
+        Assert.Equal(DiscoverySource.Onvif | DiscoverySource.ViscaScan, merged.Source);
+    }
+
+    [Fact]
+    public void ConfirmedViscaWinsOverOpenTcpPortInEitherOrder()
+    {
+        var tcp = new DiscoveredCamera(Ip) { Source = DiscoverySource.TcpPortOpen, ViscaPort = 5678, ViscaProtocol = Protocol.Tcp, ViscaUseHeader = false };
+        var udp = ViscaProbe.ToCamera(Ip, new ViscaProbeTarget(52381, true));
+
+        Assert.Equal(52381, tcp.Merge(udp).ViscaPort);
+        Assert.Equal(52381, udp.Merge(tcp).ViscaPort);
+    }
+
+    [Fact]
+    public void DisplayNameFallsBackToAddress() =>
+        Assert.Equal("Camera 192.168.1.9", new DiscoveredCamera(Ip).DisplayName);
+}
+
+public class CameraDiscoveryServiceTests
+{
+    [Fact]
+    public async Task FinishesWithoutThrowingWhenNothingIsFound()
+    {
+        var service = new CameraDiscoveryService();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await service.DiscoverAsync();
+
+        Assert.NotNull(result);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(60), $"took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public async Task CancellationStopsDiscoveryQuickly()
+    {
+        var service = new CameraDiscoveryService();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        await service.DiscoverAsync(null, cts.Token);
+
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), $"took {sw.Elapsed}");
+    }
+}

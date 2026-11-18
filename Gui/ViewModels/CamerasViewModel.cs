@@ -1,6 +1,7 @@
-﻿using Avalonia.Utilities;
+using Avalonia.Utilities;
 using PtzJoystickControl.Application.Devices;
 using PtzJoystickControl.Core.Devices;
+using PtzJoystickControl.Core.Discovery;
 using PtzJoystickControl.Core.Services;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -14,9 +15,11 @@ public class CamerasViewModel : ViewModelBase, INotifyPropertyChanged
 {
     private readonly ICamerasService _camerasService;
     private readonly GamepadsViewModel _gamepadsViewModel;
+    private readonly ICameraDiscoveryService _discoveryService;
 
-    public CamerasViewModel(ICamerasService camerasService, GamepadsViewModel gamepadsViewModel)
+    public CamerasViewModel(ICamerasService camerasService, GamepadsViewModel gamepadsViewModel, ICameraDiscoveryService discoveryService)
     {
+        _discoveryService = discoveryService;
         _camerasService = camerasService;
         _gamepadsViewModel = gamepadsViewModel;
         Cameras = _camerasService.Cameras;
@@ -50,6 +53,9 @@ public class CamerasViewModel : ViewModelBase, INotifyPropertyChanged
 
     public void AddCamera() =>
         _camerasService.AddCamera(new ViscaIpDevice($"Camera {Cameras.Count() + 1}"));
+
+    public DiscoveryViewModel CreateDiscoveryViewModel() =>
+        new(_discoveryService, _camerasService);
 
     public void RemoveCamera(object camera)
     {
