@@ -1,4 +1,4 @@
-﻿using PtzJoystickControl.Core.Db;
+using PtzJoystickControl.Core.Db;
 using PtzJoystickControl.Core.Devices;
 using PtzJoystickControl.Core.Services;
 using System.Collections.ObjectModel;
@@ -38,6 +38,8 @@ public class CamerasService : ICamerasService
     {
         Cameras.Remove(camera);
         camera.PersistentPropertyChanged -= CameraPersistentPropertyChanged;
+        // Stop asking a camera that is no longer in the list.
+        (camera as ViscaIPDeviceBase)?.EndSocket();
     }
 
     private void CameraPersistentPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

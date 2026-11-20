@@ -115,13 +115,16 @@ public abstract class ViscaIPDeviceBase : ViscaDeviceBase
 
     private void OnSocketPropChange([CallerMemberName] string propertyName = "")
     {
+        // A reply from the old address says nothing about the new one.
+        lastReceiveTime = DateTime.MinValue;
         EndSocket();
         BeginSocket();
         NotifyPropertyChanged(propertyName);
         NotifyPersistentPropertyChanged(propertyName);
+        PublishConnectionState();
     }
 
-    public override bool Connected { get { return socket != null && (socket.Connected || base.Connected); } }
+    public override bool Connected => socket != null && base.Connected;
 
     public abstract void BeginSocket();
 

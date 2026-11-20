@@ -55,7 +55,7 @@ public class CamerasViewModel : ViewModelBase, INotifyPropertyChanged
         _camerasService.AddCamera(new ViscaIpDevice($"Camera {Cameras.Count() + 1}"));
 
     public MultiviewViewModel CreateMultiviewViewModel() =>
-        new(_camerasService.Cameras.OfType<ViscaIPDeviceBase>(), camera => SelectedCamera = camera);
+        new(_camerasService.Cameras.OfType<ViscaIPDeviceBase>(), camera => SelectedCamera = camera, () => SelectedCamera, this);
 
     public DiscoveryViewModel CreateDiscoveryViewModel() =>
         new(_discoveryService, _camerasService);

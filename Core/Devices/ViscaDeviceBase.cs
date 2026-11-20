@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace PtzJoystickControl.Core.Devices;
@@ -84,32 +84,37 @@ public abstract class ViscaDeviceBase : INotifyPropertyChanged
     protected DateTime LastSendTime
     {
         get => lastSendTime;
-        set {
-            var tempConnected = Connected;
-            lastSendTime = value;
-            if (tempConnected != Connected)
-                NotifyPropertyChanged(nameof(Connected));
-        }
+        set => lastSendTime = value;
     }
 
     protected internal DateTime LastReceiveTime {
         get => lastReceiveTime;
         set
         {
-            var tempConnected = Connected;
             lastReceiveTime = value;
-            if (tempConnected != Connected)
-                NotifyPropertyChanged(nameof(Connected));
+            PublishConnectionState();
         }
     }
 
-    public virtual bool Connected { 
-        get {
-            var t = lastSendTime - lastReceiveTime;
-            return t <= TimeSpan.FromMilliseconds(500) && t >= TimeSpan.FromMilliseconds(-500); 
-        } 
+    /// <summary>How long after the last reply from the camera it still counts as connected.</summary>
+    public TimeSpan ConnectionTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>True while the camera has answered recently (the program asks regularly, so no controller is needed).</summary>
+    public virtual bool Connected =>
+        lastReceiveTime != DateTime.MinValue && DateTime.UtcNow - lastReceiveTime <= ConnectionTimeout;
+
+    private bool publishedConnected;
+
+    /// <summary>Raises PropertyChanged for <see cref="Connected"/> when its value differs from what was last announced.</summary>
+    protected void PublishConnectionState()
+    {
+        var connected = Connected;
+        if (connected == publishedConnected)
+            return;
+        publishedConnected = connected;
+        NotifyPropertyChanged(nameof(Connected));
     }
-    
+
     public Power? PowerState { get; protected internal set; }
 
     public abstract void Power(Power byteVal);

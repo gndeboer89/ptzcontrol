@@ -21,14 +21,64 @@ public class ViscaIpDevice : ViscaIPDeviceBase
 
     public ViscaIpDevice(string name, IPEndPoint? viscaEndpint) : base(name, viscaEndpint) { }
 
+    private Timer? heartbeat;
+    private readonly object socketLock = new();
+    private IPEndPoint? listenerEndpoint; // an own copy: the device's endpoint is edited in place when the address changes
+
+    /// <summary>How often the camera is asked whether it is there; this is what keeps the status up to date without a controller.</summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(2);
+
+    private void StartHeartbeat()
+    {
+        if (heartbeat != null)
+            return;
+        // Timer callbacks never overlap for the same timer, and the work is tiny.
+        heartbeat = new Timer(_ => Beat(), null, TimeSpan.Zero, HeartbeatInterval);
+    }
+
+    private void StopHeartbeat()
+    {
+        var timer = heartbeat;
+        heartbeat = null;
+        timer?.Dispose();
+        PublishConnectionState();
+    }
+
+    private void Beat()
+    {
+        try
+        {
+            // A power inquiry is read-only and answered by every VISCA camera.
+            AddCommand(AddPowerInquiry);
+            PublishConnectionState(); // also notices that replies stopped coming
+        }
+        catch (Exception e)
+        {
+            Debug.WriteLine($"Heartbeat {name}: {e.Message}");
+        }
+    }
+
     public override void BeginSocket()
+    {
+        BeginSocketCore();
+        StartHeartbeat();
+    }
+
+    private void BeginSocketCore()
+    {
+        lock (socketLock)
+            BeginSocketLocked();
+    }
+
+    private void BeginSocketLocked()
     {
         if (socket == null)
         {
             if (protocol == Protocol.Udp)
             {
                 socket = UdpSocket.GetInstance();
-                UdpSocket.AddListenerCallback(ViscaIpEndpont, ParseViscaIPReply);
+                listenerEndpoint = new IPEndPoint(ViscaIpEndpont.Address, ViscaIpEndpont.Port);
+                UdpSocket.AddListenerCallback(listenerEndpoint, ParseViscaIPReply);
                 return;
             }
             socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
@@ -53,7 +103,7 @@ public class ViscaIpDevice : ViscaIPDeviceBase
             catch (Exception e)
             {
                 Console.WriteLine($"TCP BeginSocket {name}: {e.Message}");
-                EndSocket();
+                EndSocketCore(); // keep the heartbeat running so it can reconnect
             }
         }
     }
@@ -69,7 +119,7 @@ public class ViscaIpDevice : ViscaIPDeviceBase
         catch (Exception e)
         {
             Debug.WriteLine($"TCP OnConnected {name}: {eventArgs?.SocketError} {e.Message}");
-            EndSocket();
+            EndSocketCore();
         }
     }
 
@@ -90,30 +140,61 @@ public class ViscaIpDevice : ViscaIPDeviceBase
         {
             Debug.WriteLine($"TCP OnReceive {name}: {e.Message}");
             NotifyPropertyChanged(nameof(Connected));
-            EndSocket();
+            EndSocketCore();
         }
     }
 
     public override void EndSocket()
     {
-        if (socket != null)
+        StopHeartbeat();
+        EndSocketCore();
+    }
+
+    private void EndSocketCore()
+    {
+        // Take the socket out first, so a second thread ending the same socket finds nothing to do.
+        Socket? old;
+        IPEndPoint? registered;
+        lock (socketLock)
         {
-            EventHandler<SocketAsyncEventArgs> onComplete = (sender, e) =>
+            old = socket;
+            socket = null;
+            registered = listenerEndpoint;
+            listenerEndpoint = null;
+        }
+
+        if (old != null)
+        {
+            void Finish()
             {
                 NotifyPropertyChanged(nameof(Connected));
-                if (socket != UdpSocket.GetInstance())
-                    socket.Dispose();
-                socket = null;
-            };
+                // The UDP socket is shared by all cameras; only a TCP socket belongs to this device.
+                if (old.ProtocolType != ProtocolType.Udp)
+                    old.Dispose();
+            }
 
-            SocketAsyncEventArgs socketAsyncEvArgs = new SocketAsyncEventArgs();
-            socketAsyncEvArgs.Completed += onComplete;
+            bool pending = false;
+            try
+            {
+                if (old.ProtocolType == ProtocolType.Tcp && old.Connected)
+                {
+                    var args = new SocketAsyncEventArgs();
+                    args.Completed += (_, _) => Finish();
+                    pending = old.DisconnectAsync(args);
+                }
+            }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException or InvalidOperationException)
+            {
+                Debug.WriteLine($"Disconnect {name}: {e.Message}");
+            }
 
-            //Manually invoke on complete if DisconnectAsync completed synchronusly.
-            if (!socket.Connected || !socket.DisconnectAsync(socketAsyncEvArgs))
-                onComplete.Invoke(null, null!);
+            // DisconnectAsync may complete synchronously (returns false): then nobody calls the handler.
+            if (!pending)
+                Finish();
         }
-        UdpSocket.RemoveListenerCallback(ViscaIpEndpont);
+
+        if (registered != null)
+            UdpSocket.RemoveListenerCallback(registered);
     }
 
     public void ParseViscaIPReply(byte[] buffer, int length)
@@ -444,7 +525,8 @@ public class ViscaIpDevice : ViscaIPDeviceBase
 
     public void SendCommand()
     {
-        if (socket == null)
+        var current = socket; // may be replaced or removed by another thread at any moment
+        if (current == null)
         {
             Debug.WriteLine("No socket: " + ViscaIpEndpont);
             BeginSocket();
@@ -452,7 +534,7 @@ public class ViscaIpDevice : ViscaIPDeviceBase
         }
 
 
-        if (protocol == Protocol.Tcp && !socket.Connected)
+        if (protocol == Protocol.Tcp && !current.Connected)
         {
             Debug.WriteLine("Reconnecting to client: " + ViscaIpEndpont);
             BeginSocket();
@@ -461,12 +543,12 @@ public class ViscaIpDevice : ViscaIPDeviceBase
 
         try
         {
-            socket.SendTo(sendBuffer, sendBuffIndex, SocketFlags.None, ViscaIpEndpont);
+            current.SendTo(sendBuffer, sendBuffIndex, SocketFlags.None, ViscaIpEndpont);
         }
         catch (Exception e)
         {
             Debug.WriteLine(e);
-            EndSocket();
+            EndSocketCore();
         }
     }
 

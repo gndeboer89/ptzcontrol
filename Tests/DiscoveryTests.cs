@@ -669,6 +669,7 @@ public class WindowsManifestTests
         Assert.Contains("<ApplicationManifest>app.manifest</ApplicationManifest>", File.ReadAllText(RepoFile("Gui", "Gui.csproj")));
 }
 
+[Collection("Shared UDP socket")]
 public class RawViscaReplyTests
 {
     private static PtzJoystickControl.Application.Devices.ViscaIpDevice NewDevice() => new("test");
@@ -846,4 +847,330 @@ public class HeaderDetectionTests
         Assert.Contains(lines, l => l.StartsWith("UDP 40181") && l.Contains("plain, without header"));
         Assert.Contains(lines, l => l.StartsWith("Result:") && l.Contains("leave the Header box unticked"));
     }
+}
+
+[Collection("Shared UDP socket")]
+public class ConnectionStatusTests
+{
+    // A fake camera that answers every datagram in plain VISCA, until told to stop.
+    private sealed class FakeCamera : IDisposable
+    {
+        private readonly UdpClient udp;
+        private readonly CancellationTokenSource cts = new();
+        private readonly Task loop;
+        public volatile bool Answer = true;
+        public int Received;
+
+        public FakeCamera(int port)
+        {
+            udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
+            loop = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!cts.IsCancellationRequested)
+                    {
+                        var request = await udp.ReceiveAsync(cts.Token);
+                        Interlocked.Increment(ref Received);
+                        if (Answer)
+                            await udp.SendAsync(new byte[] { 0x90, 0x50, 0x02, 0xFF }, request.RemoteEndPoint, cts.Token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { }
+            });
+        }
+
+        public void Dispose() { cts.Cancel(); udp.Dispose(); loop.Wait(1000); }
+    }
+
+    private static PtzJoystickControl.Application.Devices.ViscaIpDevice FastDevice(int port) => new("t", new IPEndPoint(IPAddress.Loopback, port))
+    {
+        Protocol = PtzJoystickControl.Core.Devices.Protocol.Udp,
+        UseHeader = false,
+        HeartbeatInterval = TimeSpan.FromMilliseconds(100),
+        ConnectionTimeout = TimeSpan.FromMilliseconds(500),
+    };
+
+    private static async Task<bool> WaitFor(Func<bool> condition, int ms = 3000)
+    {
+        for (int waited = 0; waited < ms; waited += 25)
+        {
+            if (condition()) return true;
+            await Task.Delay(25);
+        }
+        return condition();
+    }
+
+    [Fact]
+    public async Task ShowsConnectedWithoutAnyCommandBeingSent()
+    {
+        using var camera = new FakeCamera(40571);
+        var device = FastDevice(40571);
+
+        device.BeginSocket(); // what happens when the camera is added; no joystick, no commands
+
+        Assert.True(await WaitFor(() => device.Connected), "the camera answers the regular check, so it must show Connected");
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task NotifiesWhenTheStatusChangesBothWays()
+    {
+        using var camera = new FakeCamera(40572);
+        var device = FastDevice(40572);
+        var changes = new System.Collections.Concurrent.ConcurrentQueue<bool>();
+        device.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(device.Connected)) changes.Enqueue(device.Connected); };
+
+        device.BeginSocket();
+        Assert.True(await WaitFor(() => device.Connected));
+
+        camera.Answer = false; // camera switched off / unplugged
+        Assert.True(await WaitFor(() => !device.Connected), "no replies for longer than the timeout must show Disconnected");
+        Assert.True(await WaitFor(() => changes.Contains(false)), "the screen must be told about it");
+
+        camera.Answer = true; // and back again
+        Assert.True(await WaitFor(() => device.Connected));
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task StaysDisconnectedWhenNothingAnswers()
+    {
+        var device = FastDevice(40573); // nobody listens there
+        device.BeginSocket();
+        await Task.Delay(700);
+
+        Assert.False(device.Connected);
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task ChangingTheAddressForgetsTheOldAnswers()
+    {
+        using var camera = new FakeCamera(40574);
+        var device = FastDevice(40574);
+        device.BeginSocket();
+        Assert.True(await WaitFor(() => device.Connected));
+
+        device.Port = 40575; // nothing there
+
+        Assert.False(device.Connected, "a reply from the old address must not count for the new one");
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task StopsAskingAfterEndSocket()
+    {
+        using var camera = new FakeCamera(40576);
+        var device = FastDevice(40576);
+        device.BeginSocket();
+        Assert.True(await WaitFor(() => camera.Received > 2));
+
+        device.EndSocket(); // for instance when the camera is removed from the list
+        await Task.Delay(300);
+        int before = camera.Received;
+        await Task.Delay(500);
+
+        Assert.Equal(before, camera.Received);
+    }
+}
+
+[Collection("Shared UDP socket")]
+public class DeviceConcurrencyTests
+{
+    [Fact]
+    public async Task StartingStoppingAndSendingFromSeveralThreadsDoesNotCrash()
+    {
+        // The status check runs on a timer thread while the user edits the address or removes the camera.
+        // An unhandled exception on any of those threads would end the whole program (and this test run).
+        using var camera = new UdpClient(new IPEndPoint(IPAddress.Loopback, 40591));
+        using var cts = new CancellationTokenSource();
+        var cameraLoop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var r = await camera.ReceiveAsync(cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x41, 0xFF }, r.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+
+        var device = new PtzJoystickControl.Application.Devices.ViscaIpDevice("t", new IPEndPoint(IPAddress.Loopback, 40591))
+        {
+            Protocol = PtzJoystickControl.Core.Devices.Protocol.Udp,
+            UseHeader = false,
+            HeartbeatInterval = TimeSpan.FromMilliseconds(5),
+        };
+        device.BeginSocket();
+
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var stop = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+
+        Task Worker(Action action) => Task.Run(() =>
+        {
+            while (DateTime.UtcNow < stop)
+            {
+                try { action(); }
+                catch (Exception e) { errors.Enqueue(e); }
+            }
+        });
+
+        await Task.WhenAll(
+            Worker(() => device.Port = device.Port == 40591 ? 40592 : 40591),          // the user edits the address
+            Worker(() => { device.EndSocket(); device.BeginSocket(); }),                // camera removed and added again
+            Worker(() => device.PanTilt(5, 5, PtzJoystickControl.Core.Devices.PanDir.Left, PtzJoystickControl.Core.Devices.TiltDir.Up)),
+            Worker(() => _ = device.Connected));
+
+        device.EndSocket();
+        cts.Cancel();
+        await cameraLoop;
+
+        Assert.True(errors.IsEmpty, "unexpected exception: " + errors.FirstOrDefault());
+    }
+}
+
+public class MultiviewActiveCameraTests
+{
+    private sealed class FakeSelection : System.ComponentModel.INotifyPropertyChanged
+    {
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public PtzJoystickControl.Core.Devices.ViscaDeviceBase? Selected { get; private set; }
+
+        public void Set(PtzJoystickControl.Core.Devices.ViscaDeviceBase? camera, string property = "SelectedCamera")
+        {
+            Selected = camera;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(property));
+        }
+    }
+
+    // Tiles use an NDI address so no video library is needed; there is no NDI runtime here, which just shows a status text.
+    private static PtzJoystickControl.Application.Devices.ViscaIpDevice Camera(string name, string? videoUrl = "ndi://test (x)") =>
+        new(name) { VideoUrl = videoUrl };
+
+    private static PtzJoystickControl.Gui.ViewModels.MultiviewViewModel Create(
+        IEnumerable<PtzJoystickControl.Core.Devices.ViscaIPDeviceBase> cameras, FakeSelection selection) =>
+        new(cameras, _ => { }, () => selection.Selected, selection);
+
+    [Fact]
+    public void WithoutSelectionAllPicturesAreEqual()
+    {
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { Camera("A"), Camera("B") }, selection);
+
+        Assert.True(multiview.IsGridMode);
+        Assert.False(multiview.IsFocusMode);
+        Assert.Null(multiview.ActiveTile);
+        Assert.Equal(2, multiview.OtherTiles.Count);
+        Assert.Equal("No camera selected for the joystick.", multiview.ActiveDescription);
+    }
+
+    [Fact]
+    public void TheSelectedCameraBecomesTheLargeOne()
+    {
+        var a = Camera("A"); var b = Camera("B"); var c = Camera("C");
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { a, b, c }, selection);
+
+        selection.Set(b);
+
+        Assert.True(multiview.IsFocusMode);
+        Assert.Equal("B", multiview.ActiveTile?.CameraName);
+        Assert.Equal(new[] { "A", "C" }, multiview.OtherTiles.Select(t => t.CameraName));
+        Assert.Equal("Controlling: B", multiview.ActiveDescription);
+        Assert.Equal(new[] { false, true, false }, multiview.Tiles.Select(t => t.IsActive));
+    }
+
+    [Fact]
+    public void ChangingTheSelectionMovesTheHighlight()
+    {
+        var a = Camera("A"); var b = Camera("B");
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { a, b }, selection);
+
+        selection.Set(a);
+        selection.Set(b); // for instance a button on the controller
+
+        Assert.Equal("B", multiview.ActiveTile?.CameraName);
+        Assert.Equal(new[] { "A" }, multiview.OtherTiles.Select(t => t.CameraName));
+        Assert.False(multiview.Tiles[0].IsActive);
+        Assert.True(multiview.Tiles[1].IsActive);
+
+        selection.Set(null); // controller unplugged
+
+        Assert.True(multiview.IsGridMode);
+        Assert.All(multiview.Tiles, t => Assert.False(t.IsActive));
+    }
+
+    [Fact]
+    public void TheUserCanPreferTheEqualGrid()
+    {
+        var a = Camera("A");
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { a, Camera("B") }, selection);
+        selection.Set(a);
+
+        multiview.FocusLayout = false;
+
+        Assert.True(multiview.IsGridMode);
+        Assert.False(multiview.IsFocusMode);
+        Assert.True(multiview.Tiles[0].IsActive); // still marked, only the layout is equal
+    }
+
+    [Fact]
+    public void ASelectedCameraWithoutVideoIsReportedButHasNoLargePicture()
+    {
+        var withVideo = Camera("A");
+        var noVideo = Camera("NoVideo", videoUrl: null);
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { withVideo, noVideo }, selection);
+
+        selection.Set(noVideo);
+
+        Assert.Single(multiview.Tiles);
+        Assert.True(multiview.IsGridMode);
+        Assert.Equal("Controlling: NoVideo (no video address)", multiview.ActiveDescription);
+    }
+
+    [Fact]
+    public void UnrelatedPropertyChangesAreIgnoredAndDisposeStopsListening()
+    {
+        var a = Camera("A");
+        var selection = new FakeSelection();
+        var multiview = Create(new[] { a }, selection);
+
+        selection.Set(a, property: "SomethingElse");
+        Assert.Null(multiview.ActiveTile);
+
+        selection.Set(a);
+        Assert.NotNull(multiview.ActiveTile);
+
+        multiview.Dispose();
+        selection.Set(null);
+
+        Assert.NotNull(multiview.ActiveTile); // no longer follows after the window was closed
+    }
+}
+
+
+public class UdpSocketTests
+{
+    [Theory]
+    [InlineData(System.Net.Sockets.SocketError.ConnectionReset)]
+    [InlineData(System.Net.Sockets.SocketError.ConnectionRefused)]
+    [InlineData(System.Net.Sockets.SocketError.HostUnreachable)]
+    [InlineData(System.Net.Sockets.SocketError.NetworkUnreachable)]
+    public void ErrorsAboutOneUnreachableCameraDoNotStopTheSharedSocket(System.Net.Sockets.SocketError error) =>
+        Assert.True(PtzJoystickControl.Core.Utils.UdpSocket.IsHarmlessReceiveError(error));
+
+    [Theory]
+    [InlineData(System.Net.Sockets.SocketError.OperationAborted)]
+    [InlineData(System.Net.Sockets.SocketError.Shutdown)]
+    [InlineData(System.Net.Sockets.SocketError.AccessDenied)]
+    public void OtherErrorsStillCloseTheSocket(System.Net.Sockets.SocketError error) =>
+        Assert.False(PtzJoystickControl.Core.Utils.UdpSocket.IsHarmlessReceiveError(error));
 }

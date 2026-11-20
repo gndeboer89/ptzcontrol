@@ -44,6 +44,15 @@ public class VideoViewModel : ViewModelBase, IDisposable
     /// <summary>The camera this video belongs to (lets a multiview tile select it).</summary>
     public object? Camera { get; }
 
+    private bool _isActive;
+
+    /// <summary>True while this is the camera the joystick currently controls (shown highlighted in the multiview).</summary>
+    public bool IsActive
+    {
+        get => _isActive;
+        set => this.RaiseAndSetIfChanged(ref _isActive, value);
+    }
+
     public string UrlForDisplay { get; }
     public VideoSourceKind Kind { get; }
     public bool UsesVlc => Kind is VideoSourceKind.Rtsp or VideoSourceKind.Other;
