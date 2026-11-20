@@ -14,6 +14,8 @@ public enum DiscoverySource
     ViscaScan = 2,
     /// <summary>Only a TCP port was open; not confirmed to speak VISCA.</summary>
     TcpPortOpen = 4,
+    /// <summary>Announced itself as an NDI source (gives us its address, not its control port).</summary>
+    Ndi = 8,
 }
 
 /// <summary>A camera (or something that looks like one) found by discovery.</summary>
@@ -22,6 +24,9 @@ public record DiscoveredCamera(IPAddress Address)
     public string? Name { get; init; }
     public string? Hardware { get; init; }
     public Uri? OnvifServiceUri { get; init; }
+
+    /// <summary>NDI source name (for example "CAMERA (NDI)"), when the device sends NDI video.</summary>
+    public string? NdiSourceName { get; init; }
 
     public DiscoverySource Source { get; init; }
 
@@ -47,6 +52,7 @@ public record DiscoveredCamera(IPAddress Address)
             Name = Name ?? other.Name,
             Hardware = Hardware ?? other.Hardware,
             OnvifServiceUri = OnvifServiceUri ?? other.OnvifServiceUri,
+            NdiSourceName = NdiSourceName ?? other.NdiSourceName,
             Source = Source | other.Source,
             ViscaPort = viscaFrom.ViscaPort,
             ViscaProtocol = viscaFrom.ViscaProtocol,

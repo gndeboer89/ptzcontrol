@@ -508,3 +508,135 @@ public class NdiNativeTests
         Assert.Empty(PtzJoystickControl.Application.Ndi.NdiNative.ReadSourceNames(new IntPtr(1), 0));
     }
 }
+
+public class NdiDiscoveryTests
+{
+    [Theory]
+    [InlineData("192.168.1.50:5961", "192.168.1.50")]
+    [InlineData("10.0.0.7", "10.0.0.7")]
+    [InlineData("  172.16.4.2:5962 ", "172.16.4.2")]
+    public void ParsesIPv4Addresses(string input, string expected) =>
+        Assert.Equal(IPAddress.Parse(expected), PtzJoystickControl.Application.Ndi.NdiDiscovery.ParseAddress(input));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("[fe80::1]:5961")]
+    [InlineData("camera.local:5961")]
+    [InlineData("not an address")]
+    public void IgnoresUnusableAddresses(string? input) =>
+        Assert.Null(PtzJoystickControl.Application.Ndi.NdiDiscovery.ParseAddress(input));
+
+    [Fact]
+    public void BuildsOneCandidatePerAddressWithNameAndNdiSource()
+    {
+        var candidates = PtzJoystickControl.Application.Ndi.NdiDiscovery.ToCandidates(new (string, string?)[]
+        {
+            ("TENVEO-PC (PTZ Front)", "192.168.1.50:5961"),
+            ("TENVEO-PC (PTZ Front - Alt)", "192.168.1.50:5962"),   // same device, second stream
+            ("STUDIO (Cam 2)", "192.168.1.51:5961"),
+            ("V6 (Cam 3)", "[fe80::1]:5961"),                          // IPv6: ignored
+        });
+
+        Assert.Equal(2, candidates.Count);
+        var front = candidates.Single(c => c.Address.Equals(IPAddress.Parse("192.168.1.50")));
+        Assert.Equal(DiscoverySource.Ndi, front.Source);
+        Assert.NotNull(front.NdiSourceName);
+        Assert.False(front.SupportsVisca);
+        Assert.Equal("Cam 2", candidates.Single(c => c.Address.Equals(IPAddress.Parse("192.168.1.51"))).Name);
+    }
+
+    [Fact]
+    public void NdiAndViscaResultsMergeIntoOneCamera()
+    {
+        var ip = IPAddress.Parse("192.168.1.50");
+        var ndi = new DiscoveredCamera(ip) { Name = "PTZ Front", NdiSourceName = "TENVEO-PC (PTZ Front)", Source = DiscoverySource.Ndi };
+        var visca = ViscaProbe.ToCamera(ip, new ViscaProbeTarget(52381, true));
+
+        var merged = visca.Merge(ndi);
+
+        Assert.Equal("PTZ Front", merged.Name);
+        Assert.Equal("TENVEO-PC (PTZ Front)", merged.NdiSourceName);
+        Assert.Equal(52381, merged.ViscaPort);
+        Assert.Equal(DiscoverySource.Ndi | DiscoverySource.ViscaScan, merged.Source);
+    }
+}
+
+public class CameraDiagnosticsTests
+{
+    private static async Task<(UdpClient Server, Task Loop)> StartFake(IPAddress address, int port, byte[] reply, CancellationToken ct)
+    {
+        var server = new UdpClient(new IPEndPoint(address, port));
+        var loop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var request = await server.ReceiveAsync(ct);
+                    await server.SendAsync(reply, request.RemoteEndPoint, ct);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+        await Task.CompletedTask;
+        return (server, loop);
+    }
+
+    [Fact]
+    public async Task ReportsWhichPortAnswersAsVisca()
+    {
+        using var cts = new CancellationTokenSource();
+        var address = IPAddress.Parse("127.0.0.2");
+        var (server, loop) = await StartFake(address, 40131, new byte[] { 0x01, 0x11, 0, 3, 0, 0, 0, 1, 0x90, 0x50, 0xFF }, cts.Token);
+        try
+        {
+            var lines = await CameraDiagnostics.RunAsync(
+                address,
+                new[] { new ViscaProbeTarget(40131, true), new ViscaProbeTarget(40132, false) },
+                new[] { 40133 },
+                40134,
+                TimeSpan.FromMilliseconds(700),
+                CancellationToken.None);
+
+            Assert.Equal("Checking 127.0.0.2", lines[0]);
+            Assert.Contains(lines, l => l.StartsWith("UDP 40131") && l.Contains("looks like VISCA"));
+            Assert.Contains(lines, l => l.StartsWith("UDP 40132") && !l.Contains("looks like VISCA"));
+            Assert.Contains(lines, l => l.StartsWith("TCP 40133") && l.Contains("closed"));
+            Assert.Contains(lines, l => l.StartsWith("ONVIF"));
+            Assert.Contains(lines, l => l.StartsWith("Result: VISCA over IP answers on UDP 40131"));
+        }
+        finally { cts.Cancel(); server.Dispose(); await loop; }
+    }
+
+    [Fact]
+    public async Task SaysSoWhenNothingAnswers()
+    {
+        var lines = await CameraDiagnostics.RunAsync(
+            IPAddress.Parse("127.0.0.3"),
+            new[] { new ViscaProbeTarget(40141, true) },
+            new[] { 40143 },
+            40144,
+            TimeSpan.FromMilliseconds(500),
+            CancellationToken.None);
+
+        Assert.Contains(lines, l => l.StartsWith("Result: no VISCA answer"));
+    }
+
+    [Fact]
+    public async Task ShowsHexAndSourcePortOfNonViscaReply()
+    {
+        using var cts = new CancellationTokenSource();
+        var address = IPAddress.Parse("127.0.0.4");
+        var (server, loop) = await StartFake(address, 40151, System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 400"), cts.Token);
+        try
+        {
+            var lines = await CameraDiagnostics.RunAsync(address, new[] { new ViscaProbeTarget(40151, true) }, Array.Empty<int>(), 40154, TimeSpan.FromMilliseconds(600), CancellationToken.None);
+
+            Assert.Contains(lines, l => l.StartsWith("UDP 40151") && l.Contains("48-54-54-50") && l.Contains("not a VISCA answer"));
+            Assert.Contains(lines, l => l.StartsWith("Result: no VISCA answer"));
+        }
+        finally { cts.Cancel(); server.Dispose(); await loop; }
+    }
+}

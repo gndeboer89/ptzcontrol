@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
@@ -29,12 +31,29 @@ namespace PtzJoystickControl.Gui.Views
             if (DataContext is not CamerasViewModel viewModel)
                 return;
 
-            var window = new MultiviewWindow { DataContext = viewModel.CreateMultiviewViewModel() };
-            // Not modal, so the camera list and joystick settings stay usable next to it.
-            if (TopLevel.GetTopLevel(this) is Window owner)
-                window.Show(owner);
-            else
-                window.Show();
+            try
+            {
+                CrashLog.Info("Multiview: opening");
+                var multiview = viewModel.CreateMultiviewViewModel();
+                CrashLog.Info($"Multiview: {multiview.Tiles.Count} tile(s): " +
+                              string.Join(", ", multiview.Tiles.Select(t => t.Kind.ToString())));
+
+                var window = new MultiviewWindow { DataContext = multiview };
+                window.Opened += (_, _) => CrashLog.Info($"Multiview: window opened at {window.Position} size {window.Bounds.Width:0}x{window.Bounds.Height:0}");
+                window.Closed += (_, _) => CrashLog.Info("Multiview: window closed");
+
+                // Not modal, so the camera list and joystick settings stay usable next to it.
+                if (TopLevel.GetTopLevel(this) is Window owner)
+                    window.Show(owner);
+                else
+                    window.Show();
+                CrashLog.Info("Multiview: Show returned");
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Opening the multiview failed", ex);
+                MessageWindow.ShowError(this, "The multiview could not be opened", ex);
+            }
         }
 
         private void InitializeComponent()

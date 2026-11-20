@@ -21,6 +21,24 @@ public static class CrashLog
         }
     }
 
+    /// <summary>Records a single informational line (useful to see how far something got before it failed).</summary>
+    public static void Info(string message)
+    {
+        try
+        {
+            lock (Gate)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                TrimIfLarge();
+                File.AppendAllText(FilePath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  INFO  " + message + Environment.NewLine);
+            }
+        }
+        catch
+        {
+            // Logging must never cause a second failure.
+        }
+    }
+
     public static void Write(string context, Exception? exception)
     {
         try

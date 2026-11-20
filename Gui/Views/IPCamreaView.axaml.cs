@@ -34,17 +34,27 @@ public partial class IPCameraView : UserControl
         if (DataContext is not IPCameraViewModel camera)
             return;
 
-        var window = new VideoWindow
+        try
         {
-            Title = $"Video - {camera.Name}",
-            DataContext = new VideoViewModel(camera.Name, camera.VideoUrl),
-        };
+            CrashLog.Info($"Video: opening for {camera.Name}");
+            var window = new VideoWindow
+            {
+                Title = $"Video - {camera.Name}",
+                DataContext = new VideoViewModel(camera.Name, camera.VideoUrl),
+            };
 
-        // Not modal: the main window stays usable (and several videos can be open at once).
-        if (TopLevel.GetTopLevel(this) is Window owner)
-            window.Show(owner);
-        else
-            window.Show();
+            // Not modal: the main window stays usable (and several videos can be open at once).
+            if (TopLevel.GetTopLevel(this) is Window owner)
+                window.Show(owner);
+            else
+                window.Show();
+            CrashLog.Info("Video: Show returned");
+        }
+        catch (System.Exception ex)
+        {
+            CrashLog.Write("Opening the video window failed", ex);
+            MessageWindow.ShowError(this, "The video could not be opened", ex);
+        }
     }
 
     private void InitializeComponent()
