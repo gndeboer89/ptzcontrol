@@ -21,7 +21,48 @@ public class ViscaIpDevice : ViscaIPDeviceBase
 
     public ViscaIpDevice(string name, IPEndPoint? viscaEndpint) : base(name, viscaEndpint) { }
 
+    private Timer? heartbeat;
+
+    /// <summary>How often the camera is asked whether it is there; this is what keeps the status up to date without a controller.</summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(2);
+
+    private void StartHeartbeat()
+    {
+        if (heartbeat != null)
+            return;
+        // Timer callbacks never overlap for the same timer, and the work is tiny.
+        heartbeat = new Timer(_ => Beat(), null, TimeSpan.Zero, HeartbeatInterval);
+    }
+
+    private void StopHeartbeat()
+    {
+        var timer = heartbeat;
+        heartbeat = null;
+        timer?.Dispose();
+        PublishConnectionState();
+    }
+
+    private void Beat()
+    {
+        try
+        {
+            // A power inquiry is read-only and answered by every VISCA camera.
+            AddCommand(AddPowerInquiry);
+            PublishConnectionState(); // also notices that replies stopped coming
+        }
+        catch (Exception e)
+        {
+            Debug.WriteLine($"Heartbeat {name}: {e.Message}");
+        }
+    }
+
     public override void BeginSocket()
+    {
+        BeginSocketCore();
+        StartHeartbeat();
+    }
+
+    private void BeginSocketCore()
     {
         if (socket == null)
         {
@@ -53,7 +94,7 @@ public class ViscaIpDevice : ViscaIPDeviceBase
             catch (Exception e)
             {
                 Console.WriteLine($"TCP BeginSocket {name}: {e.Message}");
-                EndSocket();
+                EndSocketCore(); // keep the heartbeat running so it can reconnect
             }
         }
     }
@@ -69,7 +110,7 @@ public class ViscaIpDevice : ViscaIPDeviceBase
         catch (Exception e)
         {
             Debug.WriteLine($"TCP OnConnected {name}: {eventArgs?.SocketError} {e.Message}");
-            EndSocket();
+            EndSocketCore();
         }
     }
 
@@ -90,11 +131,17 @@ public class ViscaIpDevice : ViscaIPDeviceBase
         {
             Debug.WriteLine($"TCP OnReceive {name}: {e.Message}");
             NotifyPropertyChanged(nameof(Connected));
-            EndSocket();
+            EndSocketCore();
         }
     }
 
     public override void EndSocket()
+    {
+        StopHeartbeat();
+        EndSocketCore();
+    }
+
+    private void EndSocketCore()
     {
         if (socket != null)
         {
@@ -466,7 +513,7 @@ public class ViscaIpDevice : ViscaIPDeviceBase
         catch (Exception e)
         {
             Debug.WriteLine(e);
-            EndSocket();
+            EndSocketCore();
         }
     }
 

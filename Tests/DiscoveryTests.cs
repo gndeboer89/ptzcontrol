@@ -847,3 +847,129 @@ public class HeaderDetectionTests
         Assert.Contains(lines, l => l.StartsWith("Result:") && l.Contains("leave the Header box unticked"));
     }
 }
+
+public class ConnectionStatusTests
+{
+    // A fake camera that answers every datagram in plain VISCA, until told to stop.
+    private sealed class FakeCamera : IDisposable
+    {
+        private readonly UdpClient udp;
+        private readonly CancellationTokenSource cts = new();
+        private readonly Task loop;
+        public volatile bool Answer = true;
+        public int Received;
+
+        public FakeCamera(int port)
+        {
+            udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
+            loop = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!cts.IsCancellationRequested)
+                    {
+                        var request = await udp.ReceiveAsync(cts.Token);
+                        Interlocked.Increment(ref Received);
+                        if (Answer)
+                            await udp.SendAsync(new byte[] { 0x90, 0x50, 0x02, 0xFF }, request.RemoteEndPoint, cts.Token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { }
+            });
+        }
+
+        public void Dispose() { cts.Cancel(); udp.Dispose(); loop.Wait(1000); }
+    }
+
+    private static PtzJoystickControl.Application.Devices.ViscaIpDevice FastDevice(int port) => new("t", new IPEndPoint(IPAddress.Loopback, port))
+    {
+        Protocol = PtzJoystickControl.Core.Devices.Protocol.Udp,
+        UseHeader = false,
+        HeartbeatInterval = TimeSpan.FromMilliseconds(100),
+        ConnectionTimeout = TimeSpan.FromMilliseconds(500),
+    };
+
+    private static async Task<bool> WaitFor(Func<bool> condition, int ms = 3000)
+    {
+        for (int waited = 0; waited < ms; waited += 25)
+        {
+            if (condition()) return true;
+            await Task.Delay(25);
+        }
+        return condition();
+    }
+
+    [Fact]
+    public async Task ShowsConnectedWithoutAnyCommandBeingSent()
+    {
+        using var camera = new FakeCamera(40571);
+        var device = FastDevice(40571);
+
+        device.BeginSocket(); // what happens when the camera is added; no joystick, no commands
+
+        Assert.True(await WaitFor(() => device.Connected), "the camera answers the regular check, so it must show Connected");
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task NotifiesWhenTheStatusChangesBothWays()
+    {
+        using var camera = new FakeCamera(40572);
+        var device = FastDevice(40572);
+        var changes = new System.Collections.Concurrent.ConcurrentQueue<bool>();
+        device.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(device.Connected)) changes.Enqueue(device.Connected); };
+
+        device.BeginSocket();
+        Assert.True(await WaitFor(() => device.Connected));
+
+        camera.Answer = false; // camera switched off / unplugged
+        Assert.True(await WaitFor(() => !device.Connected), "no replies for longer than the timeout must show Disconnected");
+        Assert.True(await WaitFor(() => changes.Contains(false)), "the screen must be told about it");
+
+        camera.Answer = true; // and back again
+        Assert.True(await WaitFor(() => device.Connected));
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task StaysDisconnectedWhenNothingAnswers()
+    {
+        var device = FastDevice(40573); // nobody listens there
+        device.BeginSocket();
+        await Task.Delay(700);
+
+        Assert.False(device.Connected);
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task ChangingTheAddressForgetsTheOldAnswers()
+    {
+        using var camera = new FakeCamera(40574);
+        var device = FastDevice(40574);
+        device.BeginSocket();
+        Assert.True(await WaitFor(() => device.Connected));
+
+        device.Port = 40575; // nothing there
+
+        Assert.False(device.Connected, "a reply from the old address must not count for the new one");
+        device.EndSocket();
+    }
+
+    [Fact]
+    public async Task StopsAskingAfterEndSocket()
+    {
+        using var camera = new FakeCamera(40576);
+        var device = FastDevice(40576);
+        device.BeginSocket();
+        Assert.True(await WaitFor(() => camera.Received > 2));
+
+        device.EndSocket(); // for instance when the camera is removed from the list
+        await Task.Delay(300);
+        int before = camera.Received;
+        await Task.Delay(500);
+
+        Assert.Equal(before, camera.Received);
+    }
+}
