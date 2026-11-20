@@ -7,6 +7,7 @@ namespace PtzJoystickControl.Core.Utils;
 public class UdpSocket
 {
     private static readonly Dictionary<EndPoint, Action<byte[], int>> receiveCallbacks = new();
+    private static readonly object callbacksLock = new(); // cameras start and stop from several threads
     private static Socket? socket;
     private static int port = 0;
     private readonly static EndPoint remoteReceiveFromEndPoint = new IPEndPoint(IPAddress.Any, 0);
@@ -53,7 +54,10 @@ public class UdpSocket
             var length = socket?.EndReceiveFrom(res, ref remoteEndPoint) ?? 0;
 
             Debug.WriteLine($"UDP OnReceive: {remoteEndPoint} - {BitConverter.ToString(_buffer, 0, length)}");
-            if (length > 0 && receiveCallbacks.TryGetValue(remoteEndPoint, out var callback))
+            Action<byte[], int>? callback = null;
+            lock (callbacksLock)
+                receiveCallbacks.TryGetValue(remoteEndPoint, out callback);
+            if (length > 0 && callback != null)
             {
                 try
                 {
@@ -88,13 +92,14 @@ public class UdpSocket
     /// <param name="callback">Callback wich recived buffer and content length as parameters</param>
     public static void AddListenerCallback(EndPoint remoteEndpint, Action<byte[], int> callback)
     {
-        if (receiveCallbacks.ContainsKey(remoteEndpint))
-            throw new ArgumentException("Only one callback is allowed for each remote endpoint.");
-        receiveCallbacks.Add(remoteEndpint, callback);
+        // Registering the same endpoint again (a restart racing another restart) simply takes over.
+        lock (callbacksLock)
+            receiveCallbacks[remoteEndpint] = callback;
     }
 
     public static void RemoveListenerCallback(EndPoint remoteEndpint)
     {
-        receiveCallbacks.Remove(remoteEndpint);
+        lock (callbacksLock)
+            receiveCallbacks.Remove(remoteEndpint);
     }
 }

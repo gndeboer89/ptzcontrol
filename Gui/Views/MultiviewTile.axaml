@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="using:PtzJoystickControl.Gui.Views"
+             xmlns:vm="using:PtzJoystickControl.Gui.ViewModels"
+             x:Class="PtzJoystickControl.Gui.Views.MultiviewTile"
+             x:DataType="vm:VideoViewModel">
+
+	<UserControl.Styles>
+		<!-- Every picture has a frame; the camera under joystick control gets a thick green one. -->
+		<Style Selector="Border.tile">
+			<Setter Property="BorderBrush" Value="#444"/>
+			<Setter Property="BorderThickness" Value="2"/>
+		</Style>
+		<Style Selector="Border.tile.active">
+			<Setter Property="BorderBrush" Value="#2ECC71"/>
+			<Setter Property="BorderThickness" Value="5"/>
+		</Style>
+		<Style Selector="Border.caption">
+			<Setter Property="Background" Value="#202020"/>
+		</Style>
+		<Style Selector="Border.caption.active">
+			<Setter Property="Background" Value="#1E6B3C"/>
+		</Style>
+	</UserControl.Styles>
+
+	<Border Classes="tile" Classes.active="{Binding IsActive}" Margin="3" Background="Black" Tapped="OnTapped">
+		<Grid RowDefinitions="*,Auto">
+			<v:VideoSurface Grid.Row="0"/>
+			<Border Grid.Row="1" Classes="caption" Classes.active="{Binding IsActive}" Padding="6,3">
+				<Grid ColumnDefinitions="Auto,*,Auto">
+					<TextBlock Grid.Column="0" Text="&#9679; ACTIVE" IsVisible="{Binding IsActive}" Foreground="#7CFFB0" FontWeight="Bold" Margin="0,0,8,0"/>
+					<TextBlock Grid.Column="1" Text="{Binding CameraName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+					<TextBlock Grid.Column="2" Text="{Binding Status}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" MaxWidth="220"/>
+				</Grid>
+			</Border>
+		</Grid>
+	</Border>
+</UserControl>

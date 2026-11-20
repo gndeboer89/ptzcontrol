@@ -973,3 +973,182 @@ public class ConnectionStatusTests
         Assert.Equal(before, camera.Received);
     }
 }
+
+public class DeviceConcurrencyTests
+{
+    [Fact]
+    public async Task StartingStoppingAndSendingFromSeveralThreadsDoesNotCrash()
+    {
+        // The status check runs on a timer thread while the user edits the address or removes the camera.
+        // An unhandled exception on any of those threads would end the whole program (and this test run).
+        using var camera = new UdpClient(new IPEndPoint(IPAddress.Loopback, 40591));
+        using var cts = new CancellationTokenSource();
+        var cameraLoop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var r = await camera.ReceiveAsync(cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x41, 0xFF }, r.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+
+        var device = new PtzJoystickControl.Application.Devices.ViscaIpDevice("t", new IPEndPoint(IPAddress.Loopback, 40591))
+        {
+            Protocol = PtzJoystickControl.Core.Devices.Protocol.Udp,
+            UseHeader = false,
+            HeartbeatInterval = TimeSpan.FromMilliseconds(5),
+        };
+        device.BeginSocket();
+
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var stop = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+
+        Task Worker(Action action) => Task.Run(() =>
+        {
+            while (DateTime.UtcNow < stop)
+            {
+                try { action(); }
+                catch (Exception e) { errors.Enqueue(e); }
+            }
+        });
+
+        await Task.WhenAll(
+            Worker(() => device.Port = device.Port == 40591 ? 40592 : 40591),          // the user edits the address
+            Worker(() => { device.EndSocket(); device.BeginSocket(); }),                // camera removed and added again
+            Worker(() => device.PanTilt(5, 5, PtzJoystickControl.Core.Devices.PanDir.Left, PtzJoystickControl.Core.Devices.TiltDir.Up)),
+            Worker(() => _ = device.Connected));
+
+        device.EndSocket();
+        cts.Cancel();
+        await cameraLoop;
+
+        Assert.True(errors.IsEmpty, "unexpected exception: " + errors.FirstOrDefault());
+    }
+}
+
+public class MultiviewActiveCameraTests
+{
+    private sealed class FakeSelection : System.ComponentModel.INotifyPropertyChanged
+    {
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public PtzJoystickControl.Core.Devices.ViscaDeviceBase? Selected { get; private set; }
+
+        public void Set(PtzJoystickControl.Core.Devices.ViscaDeviceBase? camera, string property = "SelectedCamera")
+        {
+            Selected = camera;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(property));
+        }
+    }
+
+    // Tiles use an NDI address so no video library is needed; there is no NDI runtime here, which just shows a status text.
+    private static PtzJoystickControl.Application.Devices.ViscaIpDevice Camera(string name, string? videoUrl = "ndi://test (x)") =>
+        new(name) { VideoUrl = videoUrl };
+
+    private static PtzJoystickControl.Gui.ViewModels.MultiviewViewModel Create(
+        IEnumerable<PtzJoystickControl.Core.Devices.ViscaIPDeviceBase> cameras, FakeSelection selection) =>
+        new(cameras, _ => { }, () => selection.Selected, selection);
+
+    [Fact]
+    public void WithoutSelectionAllPicturesAreEqual()
+    {
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { Camera("A"), Camera("B") }, selection);
+
+        Assert.True(multiview.IsGridMode);
+        Assert.False(multiview.IsFocusMode);
+        Assert.Null(multiview.ActiveTile);
+        Assert.Equal(2, multiview.OtherTiles.Count);
+        Assert.Equal("No camera selected for the joystick.", multiview.ActiveDescription);
+    }
+
+    [Fact]
+    public void TheSelectedCameraBecomesTheLargeOne()
+    {
+        var a = Camera("A"); var b = Camera("B"); var c = Camera("C");
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { a, b, c }, selection);
+
+        selection.Set(b);
+
+        Assert.True(multiview.IsFocusMode);
+        Assert.Equal("B", multiview.ActiveTile?.CameraName);
+        Assert.Equal(new[] { "A", "C" }, multiview.OtherTiles.Select(t => t.CameraName));
+        Assert.Equal("Controlling: B", multiview.ActiveDescription);
+        Assert.Equal(new[] { false, true, false }, multiview.Tiles.Select(t => t.IsActive));
+    }
+
+    [Fact]
+    public void ChangingTheSelectionMovesTheHighlight()
+    {
+        var a = Camera("A"); var b = Camera("B");
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { a, b }, selection);
+
+        selection.Set(a);
+        selection.Set(b); // for instance a button on the controller
+
+        Assert.Equal("B", multiview.ActiveTile?.CameraName);
+        Assert.Equal(new[] { "A" }, multiview.OtherTiles.Select(t => t.CameraName));
+        Assert.False(multiview.Tiles[0].IsActive);
+        Assert.True(multiview.Tiles[1].IsActive);
+
+        selection.Set(null); // controller unplugged
+
+        Assert.True(multiview.IsGridMode);
+        Assert.All(multiview.Tiles, t => Assert.False(t.IsActive));
+    }
+
+    [Fact]
+    public void TheUserCanPreferTheEqualGrid()
+    {
+        var a = Camera("A");
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { a, Camera("B") }, selection);
+        selection.Set(a);
+
+        multiview.FocusLayout = false;
+
+        Assert.True(multiview.IsGridMode);
+        Assert.False(multiview.IsFocusMode);
+        Assert.True(multiview.Tiles[0].IsActive); // still marked, only the layout is equal
+    }
+
+    [Fact]
+    public void ASelectedCameraWithoutVideoIsReportedButHasNoLargePicture()
+    {
+        var withVideo = Camera("A");
+        var noVideo = Camera("NoVideo", videoUrl: null);
+        var selection = new FakeSelection();
+        using var multiview = Create(new[] { withVideo, noVideo }, selection);
+
+        selection.Set(noVideo);
+
+        Assert.Single(multiview.Tiles);
+        Assert.True(multiview.IsGridMode);
+        Assert.Equal("Controlling: NoVideo (no video address)", multiview.ActiveDescription);
+    }
+
+    [Fact]
+    public void UnrelatedPropertyChangesAreIgnoredAndDisposeStopsListening()
+    {
+        var a = Camera("A");
+        var selection = new FakeSelection();
+        var multiview = Create(new[] { a }, selection);
+
+        selection.Set(a, property: "SomethingElse");
+        Assert.Null(multiview.ActiveTile);
+
+        selection.Set(a);
+        Assert.NotNull(multiview.ActiveTile);
+
+        multiview.Dispose();
+        selection.Set(null);
+
+        Assert.NotNull(multiview.ActiveTile); // no longer follows after the window was closed
+    }
+}
