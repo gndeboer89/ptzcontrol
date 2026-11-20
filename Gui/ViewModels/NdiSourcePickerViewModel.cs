@@ -51,7 +51,7 @@ public class NdiSourcePickerViewModel : ViewModelBase
         Sources.Clear();
         try
         {
-            var found = await Task.Run(() => NdiSourceFinder.FindAsync(TimeSpan.FromSeconds(4), _cts.Token));
+            var found = await Task.Run(() => NdiSourceFinder.Find(TimeSpan.FromSeconds(4), _cts.Token));
             foreach (var name in found)
                 Sources.Add(name);
             Status = found.Count == 0

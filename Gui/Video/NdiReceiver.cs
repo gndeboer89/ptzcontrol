@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
-using NewTek;
+using PtzJoystickControl.Application.Ndi;
 using PtzJoystickControl.Core.Video;
 
 namespace PtzJoystickControl.Gui.Video;
@@ -65,18 +65,18 @@ internal sealed class NdiReceiver : IDisposable
                 return;
             }
 
-            nameUtf8 = NewTek.NDI.UTF.StringToUtf8(_sourceName);
-            recvNameUtf8 = NewTek.NDI.UTF.StringToUtf8("PTZ Joystick Control");
-            var settings = new NDIlib.recv_create_v3_t
+            nameUtf8 = NdiNative.AllocUtf8(_sourceName);
+            recvNameUtf8 = NdiNative.AllocUtf8("PTZ Joystick Control");
+            var settings = new NdiNative.RecvCreateV3
             {
-                source_to_connect_to = new NDIlib.source_t { p_ndi_name = nameUtf8 },
-                color_format = NDIlib.recv_color_format_e.recv_color_format_BGRX_BGRA,
-                bandwidth = NDIlib.recv_bandwidth_e.recv_bandwidth_highest,
-                allow_video_fields = false,
-                p_ndi_recv_name = recvNameUtf8,
+                SourceToConnectTo = new NdiNative.Source { Name = nameUtf8 },
+                ColorFormat = NdiNative.ColorFormat.BgrxBgra,
+                Bandwidth = NdiNative.Bandwidth.Highest,
+                AllowVideoFields = 0,
+                ReceiverName = recvNameUtf8,
             };
 
-            receiver = NDIlib.recv_create_v3(ref settings);
+            receiver = NdiNative.RecvCreate3(ref settings);
             if (receiver == IntPtr.Zero)
             {
                 StatusChanged?.Invoke("Could not create the NDI receiver.");
@@ -89,16 +89,16 @@ internal sealed class NdiReceiver : IDisposable
 
             while (!_cts.IsCancellationRequested)
             {
-                var video = new NDIlib.video_frame_v2_t();
-                var audio = new NDIlib.audio_frame_v3_t();
-                var metadata = new NDIlib.metadata_frame_t();
+                var video = new NdiNative.VideoFrameV2();
+                var audio = new NdiNative.AudioFrameV2();
+                var metadata = new NdiNative.MetadataFrame();
 
-                var type = NDIlib.recv_capture_v3(receiver, ref video, ref audio, ref metadata, 200);
+                var type = NdiNative.RecvCapture2(receiver, ref video, ref audio, ref metadata, 200);
                 switch (type)
                 {
-                    case NDIlib.frame_type_e.frame_type_video:
+                    case NdiNative.FrameType.Video:
                         try { StoreFrame(video); }
-                        finally { NDIlib.recv_free_video_v2(receiver, ref video); }
+                        finally { NdiNative.RecvFreeVideo2(receiver, ref video); }
                         lastVideo = DateTime.UtcNow;
                         if (!gotVideo)
                         {
@@ -106,13 +106,13 @@ internal sealed class NdiReceiver : IDisposable
                             StatusChanged?.Invoke("Playing (NDI)");
                         }
                         break;
-                    case NDIlib.frame_type_e.frame_type_audio:
-                        NDIlib.recv_free_audio_v3(receiver, ref audio); // audio is not played yet
+                    case NdiNative.FrameType.Audio:
+                        NdiNative.RecvFreeAudio2(receiver, ref audio); // audio is not played yet
                         break;
-                    case NDIlib.frame_type_e.frame_type_metadata:
-                        NDIlib.recv_free_metadata(receiver, ref metadata);
+                    case NdiNative.FrameType.Metadata:
+                        NdiNative.RecvFreeMetadata(receiver, ref metadata);
                         break;
-                    case NDIlib.frame_type_e.frame_type_error:
+                    case NdiNative.FrameType.Error:
                         StatusChanged?.Invoke("The NDI connection failed.");
                         return;
                 }
@@ -122,7 +122,7 @@ internal sealed class NdiReceiver : IDisposable
                     gotVideo = false;
                     StatusChanged?.Invoke("No video from the NDI source. Waiting...");
                 }
-                else if (!gotVideo && DateTime.UtcNow - lastVideo > TimeSpan.FromSeconds(8) && NDIlib.recv_get_no_connections(receiver) == 0)
+                else if (!gotVideo && DateTime.UtcNow - lastVideo > TimeSpan.FromSeconds(8) && NdiNative.RecvGetNoConnections(receiver) == 0)
                 {
                     StatusChanged?.Invoke($"NDI source \"{_sourceName}\" not found on the network.");
                     lastVideo = DateTime.UtcNow;
@@ -136,19 +136,19 @@ internal sealed class NdiReceiver : IDisposable
         finally
         {
             if (receiver != IntPtr.Zero)
-                NDIlib.recv_destroy(receiver);
-            if (nameUtf8 != IntPtr.Zero) Marshal.FreeHGlobal(nameUtf8);
-            if (recvNameUtf8 != IntPtr.Zero) Marshal.FreeHGlobal(recvNameUtf8);
+                NdiNative.RecvDestroy(receiver);
+            NdiNative.FreeUtf8(nameUtf8);
+            NdiNative.FreeUtf8(recvNameUtf8);
         }
     }
 
-    private void StoreFrame(NDIlib.video_frame_v2_t video)
+    private void StoreFrame(NdiNative.VideoFrameV2 video)
     {
-        if (video.p_data == IntPtr.Zero || video.xres <= 0 || video.yres <= 0)
+        if (video.Data == IntPtr.Zero || video.Xres <= 0 || video.Yres <= 0)
             return;
 
-        int rowBytes = video.xres * BytesPerPixel;
-        int length = rowBytes * video.yres;
+        int rowBytes = video.Xres * BytesPerPixel;
+        int length = rowBytes * video.Yres;
 
         lock (_frameGate)
         {
@@ -159,10 +159,10 @@ internal sealed class NdiReceiver : IDisposable
                 _back = new byte[length];
 
             // BGRX/BGRA frames have a stride that may be larger than the row.
-            FrameCopy.ToManaged(video.p_data, Math.Max(video.line_stride_in_bytes, rowBytes), video.yres, rowBytes, _back);
+            FrameCopy.ToManaged(video.Data, Math.Max(video.LineStrideInBytes, rowBytes), video.Yres, rowBytes, _back);
             (_front, _back) = (_back, _front);
-            _frameWidth = video.xres;
-            _frameHeight = video.yres;
+            _frameWidth = video.Xres;
+            _frameHeight = video.Yres;
             _framePending = true;
         }
         FrameAvailable?.Invoke();

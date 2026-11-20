@@ -470,3 +470,41 @@ public class ViscaUdpScanTests
         Assert.Empty(found);
     }
 }
+
+public class NdiNativeTests
+{
+    [Fact]
+    public void StructsMatchTheNdiHeadersOn64Bit()
+    {
+        if (IntPtr.Size != 8)
+            return; // sizes below are the 64-bit ones from the NDI SDK headers
+
+        Assert.Equal(16, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.Source>());
+        Assert.Equal(24, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.FindCreate>());
+        Assert.Equal(40, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.RecvCreateV3>());
+        Assert.Equal(72, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.VideoFrameV2>());
+        Assert.Equal(56, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.AudioFrameV2>());
+        Assert.Equal(24, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.MetadataFrame>());
+    }
+
+    [Fact]
+    public void LooksForTheNewestRuntimeFirst() =>
+        Assert.Equal("NDI_RUNTIME_DIR_V6", PtzJoystickControl.Application.Ndi.NdiNative.RuntimeDirVariables[0]);
+
+    [Fact]
+    public void RuntimeFileNameMatchesThePlatform()
+    {
+        var name = PtzJoystickControl.Application.Ndi.NdiNative.RuntimeFileName();
+        if (OperatingSystem.IsWindows())
+            Assert.Matches(@"^Processing\.NDI\.Lib\.x(64|86)\.dll$", name);
+        else
+            Assert.StartsWith("libndi", name);
+    }
+
+    [Fact]
+    public void ReadSourceNamesHandlesNullAndEmpty()
+    {
+        Assert.Empty(PtzJoystickControl.Application.Ndi.NdiNative.ReadSourceNames(IntPtr.Zero, 3));
+        Assert.Empty(PtzJoystickControl.Application.Ndi.NdiNative.ReadSourceNames(new IntPtr(1), 0));
+    }
+}
