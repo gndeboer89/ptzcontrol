@@ -1,11 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-	<Version>0.1.6.0</Version>
+	<Version>0.1.7.0</Version>
     <OutputType>WinExe</OutputType>
 	<Title>PTZ Joystick Control</Title>
 	<AssemblyTitle>PTZ Joystick Control</AssemblyTitle>
 	<AssemblyName>Gui</AssemblyName>
 	<ApplicationIcon>./Assets/icon.ico</ApplicationIcon>
+	<ApplicationManifest>app.manifest</ApplicationManifest>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <!--Avalonia doesen't support TrimMode=link currently,but we are working on that https://github.com/AvaloniaUI/Avalonia/issues/6892 -->
