@@ -39,6 +39,10 @@ internal class Program
         //Trace.Listeners.Add(new TextWriterTraceListener(f));
         Debug.AutoFlush = true;
 
+        // Leave a trace of anything unexpected, so a crash can be investigated afterwards.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write("Unhandled exception (terminating: " + e.IsTerminating + ")", e.ExceptionObject as Exception);
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) => { CrashLog.Write("Unobserved task exception", e.Exception); e.SetObserved(); };
+
         var appBuilder = BuildAvaloniaApp();
 
         // Mutex to ensure only one instance will 
