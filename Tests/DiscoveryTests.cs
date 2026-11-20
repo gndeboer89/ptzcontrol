@@ -669,6 +669,7 @@ public class WindowsManifestTests
         Assert.Contains("<ApplicationManifest>app.manifest</ApplicationManifest>", File.ReadAllText(RepoFile("Gui", "Gui.csproj")));
 }
 
+[Collection("Shared UDP socket")]
 public class RawViscaReplyTests
 {
     private static PtzJoystickControl.Application.Devices.ViscaIpDevice NewDevice() => new("test");
@@ -848,6 +849,7 @@ public class HeaderDetectionTests
     }
 }
 
+[Collection("Shared UDP socket")]
 public class ConnectionStatusTests
 {
     // A fake camera that answers every datagram in plain VISCA, until told to stop.
@@ -974,6 +976,7 @@ public class ConnectionStatusTests
     }
 }
 
+[Collection("Shared UDP socket")]
 public class DeviceConcurrencyTests
 {
     [Fact]
@@ -1151,4 +1154,23 @@ public class MultiviewActiveCameraTests
 
         Assert.NotNull(multiview.ActiveTile); // no longer follows after the window was closed
     }
+}
+
+
+public class UdpSocketTests
+{
+    [Theory]
+    [InlineData(System.Net.Sockets.SocketError.ConnectionReset)]
+    [InlineData(System.Net.Sockets.SocketError.ConnectionRefused)]
+    [InlineData(System.Net.Sockets.SocketError.HostUnreachable)]
+    [InlineData(System.Net.Sockets.SocketError.NetworkUnreachable)]
+    public void ErrorsAboutOneUnreachableCameraDoNotStopTheSharedSocket(System.Net.Sockets.SocketError error) =>
+        Assert.True(PtzJoystickControl.Core.Utils.UdpSocket.IsHarmlessReceiveError(error));
+
+    [Theory]
+    [InlineData(System.Net.Sockets.SocketError.OperationAborted)]
+    [InlineData(System.Net.Sockets.SocketError.Shutdown)]
+    [InlineData(System.Net.Sockets.SocketError.AccessDenied)]
+    public void OtherErrorsStillCloseTheSocket(System.Net.Sockets.SocketError error) =>
+        Assert.False(PtzJoystickControl.Core.Utils.UdpSocket.IsHarmlessReceiveError(error));
 }
