@@ -115,7 +115,8 @@ public class VideoViewModel : ViewModelBase, IDisposable
             }
 
             // Prefer TCP-interleaved RTSP (survives Wi-Fi/firewalls) and a small buffer for low latency.
-            using var media = new Media(libVlc, new Uri(_url));
+            // The media must stay alive until Play has run, so it is released inside the task below, not here.
+            var media = new Media(libVlc, new Uri(_url));
             media.AddOption(":rtsp-tcp");
             media.AddOption(":network-caching=150");
             media.AddOption(":live-caching=150");
@@ -123,11 +124,28 @@ public class VideoViewModel : ViewModelBase, IDisposable
             Status = "Connecting...";
             var player2 = _mediaPlayer!;
             // Play can block on network I/O; keep the UI responsive.
-            Task.Run(() => player2.Play(media));
+            Task.Run(() =>
+            {
+                try
+                {
+                    if (!_disposed)
+                        player2.Play(media); // the player keeps its own reference to the media
+                }
+                catch (Exception e) when (e is VLCException or ObjectDisposedException or InvalidOperationException)
+                {
+                    OnUi(() => Status = "Could not start the stream: " + e.Message);
+                }
+                finally
+                {
+                    media.Dispose();
+                }
+            });
         }
-        catch (Exception e) when (e is VLCException or DllNotFoundException or BadImageFormatException)
+        catch (Exception e)
         {
-            Status = "The video component (VLC) could not be loaded: " + e.Message;
+            // One failing tile must never take the whole program (or the multiview) down with it.
+            CrashLog.Write("Starting video failed for " + CameraName, e);
+            Status = "The video could not be started: " + e.Message;
         }
     }
 

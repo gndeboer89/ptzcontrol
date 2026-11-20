@@ -22,6 +22,13 @@ namespace PtzJoystickControl.Gui
 
         public override void OnFrameworkInitializationCompleted()
         {
+            // An error in one window (for example a video tile) should be logged and survived, not end the program.
+            Dispatcher.UIThread.UnhandledException += (_, e) =>
+            {
+                CrashLog.Write("Unhandled UI exception", e.Exception);
+                e.Handled = true;
+            };
+
             if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
                 return;
 
