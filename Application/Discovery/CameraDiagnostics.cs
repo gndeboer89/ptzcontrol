@@ -47,8 +47,10 @@ public static class CameraDiagnostics
 
         var visca = udpTasks.Where(t => t.Result.IsVisca).Select(t => t.Result.Target).ToList();
         lines.Add("");
+        bool plain = udpTasks.Any(t => t.Result.IsVisca && t.Result.PlainReply);
         lines.Add(visca.Count > 0
-            ? "Result: VISCA over IP answers on " + string.Join(", ", visca.Select(t => $"UDP {t.Port}")) + ". Use that port when adding the camera."
+            ? "Result: VISCA over IP answers on " + string.Join(", ", visca.Select(t => $"UDP {t.Port}")) + ". Use that port when adding the camera." +
+              (plain ? " The camera answers in plain VISCA (without the header): leave the Header box unticked." : "")
             : "Result: no VISCA answer on UDP. Check in the camera's web page that VISCA over IP is enabled and which port it uses, " +
               "and that Windows Firewall does not block this program (Windows Security > Firewall > Allow an app).");
         return lines;
@@ -71,7 +73,7 @@ public static class CameraDiagnostics
         }
     }
 
-    private static async Task<(string Line, bool IsVisca, ViscaProbeTarget Target)> ProbeUdpAsync(
+    private static async Task<(string Line, bool IsVisca, ViscaProbeTarget Target, bool PlainReply)> ProbeUdpAsync(
         IPAddress address, ViscaProbeTarget target, TimeSpan wait, CancellationToken ct)
     {
         var label = $"UDP {target.Port} ({(target.UseHeader ? "VISCA with header" : "raw VISCA")}): ";
@@ -87,21 +89,24 @@ public static class CameraDiagnostics
             {
                 UdpReceiveResult reply;
                 try { reply = await udp.ReceiveAsync(timeout.Token).ConfigureAwait(false); }
-                catch (SocketException e) when (e.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionRefused) { return (label + "port closed (the camera refused it)", false, target); }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return (label + "no reply", false, target); }
+                catch (SocketException e) when (e.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionRefused) { return (label + "port closed (the camera refused it)", false, target, false); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return (label + "no reply", false, target, false); }
 
                 if (!reply.RemoteEndPoint.Address.Equals(address))
                     continue;
 
                 var isVisca = ViscaProbe.IsViscaReply(reply.Buffer, reply.Buffer.Length);
                 var from = reply.RemoteEndPoint.Port == target.Port ? "" : $" from port {reply.RemoteEndPoint.Port}";
-                return ($"{label}reply{from}: {Hex(reply.Buffer)} - {(isVisca ? "looks like VISCA" : "not a VISCA answer")}", isVisca, target);
+                var kind = !isVisca ? "not a VISCA answer"
+                    : ViscaProbe.IsHeaderedReply(reply.Buffer, reply.Buffer.Length) ? "looks like VISCA (with header)"
+                    : "looks like VISCA (plain, without header)";
+                return ($"{label}reply{from}: {Hex(reply.Buffer)} - {kind}", isVisca, target, isVisca && !ViscaProbe.IsHeaderedReply(reply.Buffer, reply.Buffer.Length));
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e) when (e is SocketException or ObjectDisposedException)
         {
-            return (label + "error: " + e.Message, false, target);
+            return (label + "error: " + e.Message, false, target, false);
         }
     }
 

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -54,7 +54,17 @@ public class UdpSocket
 
             Debug.WriteLine($"UDP OnReceive: {remoteEndPoint} - {BitConverter.ToString(_buffer, 0, length)}");
             if (length > 0 && receiveCallbacks.TryGetValue(remoteEndPoint, out var callback))
-                callback(_buffer, length);
+            {
+                try
+                {
+                    callback(_buffer, length);
+                }
+                catch (Exception e)
+                {
+                    // One bad packet must not stop the receive loop for every camera.
+                    Debug.WriteLine($"UDP callback failed: {e.Message}");
+                }
+            }
 
             remoteEndPoint = remoteReceiveFromEndPoint;
             socket?.BeginReceiveFrom(_buffer, 0, _buffer.Length, SocketFlags.None, ref remoteEndPoint, new AsyncCallback(OnRecieve), null);

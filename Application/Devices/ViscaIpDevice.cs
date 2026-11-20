@@ -1,4 +1,4 @@
-﻿using PtzJoystickControl.Core.Devices;
+using PtzJoystickControl.Core.Devices;
 using PtzJoystickControl.Core.Utils;
 using PtzJoystickControl.Core.ViscaCommands;
 using System.Diagnostics;
@@ -118,7 +118,15 @@ public class ViscaIpDevice : ViscaIPDeviceBase
 
     public void ParseViscaIPReply(byte[] buffer, int length)
     {
-        ViscaIPCommandParser.ParseReply(this, buffer, length);
+        try
+        {
+            ViscaIPCommandParser.ParseReply(this, buffer, length);
+        }
+        catch (Exception e)
+        {
+            // An unexpected packet must not stop us listening to this (or any other) camera.
+            Debug.WriteLine($"Ignoring unparsable reply from {ViscaIpEndpont}: {e.Message}");
+        }
     }
 
     public override void Power(Power power)
