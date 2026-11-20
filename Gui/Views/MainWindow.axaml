@@ -15,7 +15,7 @@
 	<Grid RowDefinitions="Auto,*">
 		<Grid.ColumnDefinitions>
 			<ColumnDefinition Width="4*" MinWidth="550"/>
-			<ColumnDefinition Width="3*" MinWidth="420"/>
+			<ColumnDefinition Width="3*" MinWidth="660"/>
 		</Grid.ColumnDefinitions>
 		
 		<ExperimentalAcrylicBorder IsVisible="{Binding AcrylicEnabled}" IsHitTestVisible="False" Grid.ColumnSpan="2" Grid.RowSpan="2">

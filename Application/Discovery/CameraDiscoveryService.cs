@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using PtzJoystickControl.Application.Ndi;
 using PtzJoystickControl.Core.Discovery;
 
 namespace PtzJoystickControl.Application.Discovery;
@@ -35,6 +36,9 @@ public class CameraDiscoveryService : ICameraDiscoveryService
             tasks.Add(SafeAsync(() => ScanViscaTcpAsync(local, prefix, Report, cancellationToken)));
         }
 
+        // NDI sources reveal a camera's address even when it does not answer our VISCA probes.
+        tasks.Add(SafeAsync(() => FindNdiAsync(Report, cancellationToken)));
+
         await Task.WhenAll(tasks).ConfigureAwait(false);
 
         return found.Values.OrderBy(c => c.Address.GetAddressBytes(), ByteArrayComparer.Instance).ToList();
@@ -48,6 +52,22 @@ public class CameraDiscoveryService : ICameraDiscoveryService
         catch (Exception e) when (e is SocketException or IOException or ObjectDisposedException or InvalidOperationException)
         {
             Debug.WriteLine($"Discovery error: {e.Message}");
+        }
+    }
+
+    private static async Task FindNdiAsync(Action<DiscoveredCamera> report, CancellationToken ct)
+    {
+        try
+        {
+            var candidates = await Task.Run(() => NdiDiscovery.Find(OnvifListenTime, ct), ct).ConfigureAwait(false);
+            foreach (var candidate in candidates)
+                report(candidate);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e)
+        {
+            // NDI is optional: a missing or misbehaving runtime must never break the rest of the discovery.
+            Debug.WriteLine($"NDI discovery failed: {e.Message}");
         }
     }
 

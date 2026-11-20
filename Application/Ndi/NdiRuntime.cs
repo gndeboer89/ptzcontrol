@@ -1,12 +1,9 @@
-using System;
-using PtzJoystickControl.Application.Ndi;
-
-namespace PtzJoystickControl.Gui.Video;
+namespace PtzJoystickControl.Application.Ndi;
 
 /// <summary>
 /// Loads the NDI runtime the user has installed (NDI Tools / NDI Runtime). We do not ship NDI itself.
 /// </summary>
-internal static class NdiRuntime
+public static class NdiRuntime
 {
     public const string DownloadUrl = "https://ndi.video/tools/";
 

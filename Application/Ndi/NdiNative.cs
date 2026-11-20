@@ -215,6 +215,24 @@ public static class NdiNative
             Marshal.FreeCoTaskMem(pointer);
     }
 
+    /// <summary>Reads <paramref name="count"/> sources (name and address) from the array returned by <see cref="FindGetCurrentSources"/>.</summary>
+    public static List<(string Name, string? Address)> ReadSources(IntPtr sources, uint count)
+    {
+        var result = new List<(string, string?)>();
+        if (sources == IntPtr.Zero)
+            return result;
+
+        int size = Marshal.SizeOf<Source>();
+        for (uint i = 0; i < count; i++)
+        {
+            var source = Marshal.PtrToStructure<Source>(IntPtr.Add(sources, checked((int)i * size)));
+            var name = Marshal.PtrToStringUTF8(source.Name);
+            if (!string.IsNullOrWhiteSpace(name))
+                result.Add((name, Marshal.PtrToStringUTF8(source.UrlAddress)));
+        }
+        return result;
+    }
+
     /// <summary>Reads <paramref name="count"/> source names from the array returned by <see cref="FindGetCurrentSources"/>.</summary>
     public static List<string> ReadSourceNames(IntPtr sources, uint count)
     {

@@ -42,6 +42,11 @@ dotnet run --project Gui
 
 NDI® is a registered trademark of Vizrt Group.
 
+## Troubleshooting
+- **A camera is not found by "Find cameras..."**: open *Camera not found? Check an address* in that window, enter the camera's IP address and press *Check address*. The report shows which protocols and ports the camera answers on. Cameras that send NDI are also listed, with their address, even when VISCA is not detected; they are then added with the default VISCA port (UDP 52381), which you can change in the camera row.
+- **Windows Firewall**: if you dismissed the firewall question when the program first used the network, Windows may block replies. Allow *PTZ Joystick Control* under *Windows Security > Firewall > Allow an app through firewall*.
+- **Something does not open or crashes**: the program writes a log to `%AppData%\PTZJoystickControl\crash.log` (Linux: `~/.PTZJoystickControl/crash.log`). Include it when reporting a problem.
+
 ## Fork notice
 This is a fork of [AronHetLam/PTZJoystickControl](https://github.com/AronHetLam/PTZJoystickControl), modernized to .NET 10 and Avalonia 11.
 
