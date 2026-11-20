@@ -76,6 +76,7 @@ public class CameraDiscoveryService : ICameraDiscoveryService
     private static async Task ProbeOnvifAsync(IPAddress local, Action<DiscoveredCamera> report, CancellationToken ct)
     {
         using var udp = new UdpClient(new IPEndPoint(local, 0));
+        DisableUdpConnectionReset(udp);
         var probe = System.Text.Encoding.UTF8.GetBytes(WsDiscovery.BuildProbe(Guid.NewGuid()));
         await udp.SendAsync(probe, new IPEndPoint(WsDiscovery.MulticastAddress, WsDiscovery.Port), ct).ConfigureAwait(false);
 
@@ -85,7 +86,9 @@ public class CameraDiscoveryService : ICameraDiscoveryService
         {
             while (true)
             {
-                var result = await udp.ReceiveAsync(timeout.Token).ConfigureAwait(false);
+                UdpReceiveResult result;
+                try { result = await udp.ReceiveAsync(timeout.Token).ConfigureAwait(false); }
+                catch (SocketException e) when (e.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionRefused or SocketError.HostUnreachable or SocketError.NetworkUnreachable) { continue; }
                 var camera = WsDiscovery.ParseProbeMatch(result.Buffer, result.Buffer.Length, result.RemoteEndPoint.Address);
                 if (camera != null)
                     report(camera);
@@ -94,39 +97,65 @@ public class CameraDiscoveryService : ICameraDiscoveryService
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { /* listen time is over */ }
     }
 
-    private static async Task ScanViscaUdpAsync(IPAddress local, int prefixLength, Action<DiscoveredCamera> report, CancellationToken ct)
+    private static Task ScanViscaUdpAsync(IPAddress local, int prefixLength, Action<DiscoveredCamera> report, CancellationToken ct) =>
+        ScanViscaUdpAsync(local, SubnetEnumerator.Hosts(local, prefixLength), ViscaProbe.UdpTargets, ScanReplyWait, report, ct);
+
+    /// <summary>
+    /// Sends a VISCA inquiry to every host on every target port and reports hosts that answer like a VISCA camera.
+    /// Internal (not private) so tests can run it against fake cameras on the loopback network.
+    /// </summary>
+    internal static async Task ScanViscaUdpAsync(
+        IPAddress local,
+        IEnumerable<IPAddress> hosts,
+        IReadOnlyList<ViscaProbeTarget> targets,
+        TimeSpan replyWait,
+        Action<DiscoveredCamera> report,
+        CancellationToken ct)
     {
         using var udp = new UdpClient(new IPEndPoint(local, 0));
+        DisableUdpConnectionReset(udp);
 
         using var receiveCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var receiver = Task.Run(async () =>
         {
-            try
+            while (!receiveCts.IsCancellationRequested)
             {
-                while (true)
+                UdpReceiveResult result;
+                try
                 {
-                    var result = await udp.ReceiveAsync(receiveCts.Token).ConfigureAwait(false);
-                    if (!ViscaProbe.IsViscaReply(result.Buffer, result.Buffer.Length))
-                        continue;
-                    // The camera answers from the port we probed, which tells us which format it speaks.
-                    foreach (var target in ViscaProbe.UdpTargets)
+                    result = await udp.ReceiveAsync(receiveCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (ObjectDisposedException) { return; }
+                catch (SocketException e) when (e.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionRefused or SocketError.HostUnreachable or SocketError.NetworkUnreachable)
+                {
+                    // Windows reports an earlier "port unreachable" (ICMP) for a host we probed as an error on the next
+                    // receive. That says nothing about the other hosts, so it must not stop us listening.
+                    continue;
+                }
+                catch (SocketException)
+                {
+                    return;
+                }
+
+                if (!ViscaProbe.IsViscaReply(result.Buffer, result.Buffer.Length))
+                    continue;
+                // The camera answers from the port we probed, which tells us which format it speaks.
+                foreach (var target in targets)
+                {
+                    if (target.Port == result.RemoteEndPoint.Port)
                     {
-                        if (target.Port == result.RemoteEndPoint.Port)
-                        {
-                            report(ViscaProbe.ToCamera(result.RemoteEndPoint.Address, target));
-                            break;
-                        }
+                        report(ViscaProbe.ToCamera(result.RemoteEndPoint.Address, target));
+                        break;
                     }
                 }
             }
-            catch (OperationCanceledException) { }
-            catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
         }, CancellationToken.None);
 
         int sent = 0;
-        foreach (var host in SubnetEnumerator.Hosts(local, prefixLength))
+        foreach (var host in hosts)
         {
-            foreach (var target in ViscaProbe.UdpTargets)
+            foreach (var target in targets)
             {
                 ct.ThrowIfCancellationRequested();
                 var packet = ViscaProbe.BuildInquiry(target.UseHeader);
@@ -138,11 +167,30 @@ public class CameraDiscoveryService : ICameraDiscoveryService
                 await Task.Delay(5, ct).ConfigureAwait(false);
         }
 
-        try { await Task.Delay(ScanReplyWait, ct).ConfigureAwait(false); }
+        try { await Task.Delay(replyWait, ct).ConfigureAwait(false); }
         finally
         {
             receiveCts.Cancel();
             await receiver.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Windows turns ICMP "port unreachable" answers into receive errors on UDP sockets (SIO_UDP_CONNRESET).
+    /// A scan provokes lots of those, so switch that behaviour off.
+    /// </summary>
+    private static void DisableUdpConnectionReset(UdpClient udp)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+        try
+        {
+            const int SIO_UDP_CONNRESET = -1744830452;
+            udp.Client.IOControl(SIO_UDP_CONNRESET, new byte[] { 0, 0, 0, 0 }, null);
+        }
+        catch (Exception e) when (e is SocketException or NotSupportedException or InvalidOperationException)
+        {
+            Debug.WriteLine($"Could not disable UDP connection reset: {e.Message}");
         }
     }
 

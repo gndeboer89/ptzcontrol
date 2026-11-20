@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using PtzJoystickControl.Application.Discovery;
 using PtzJoystickControl.Core.Devices;
@@ -371,5 +372,139 @@ public class NdiUrlTests
 
         Assert.Equal(VideoSourceKind.Ndi, VideoSourceUrl.Classify(url));
         Assert.Equal(name, VideoSourceUrl.NdiSourceName(url));
+    }
+}
+
+public class ViscaUdpScanTests
+{
+    // A stand-in camera on the loopback network that answers a VISCA inquiry from the port it listens on.
+    private static async Task<(UdpClient Server, Task Loop)> StartFakeCamera(IPAddress address, int port, Func<byte[], byte[]?> reply, CancellationToken ct)
+    {
+        var server = new UdpClient(new IPEndPoint(address, port));
+        var loop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var request = await server.ReceiveAsync(ct);
+                    var answer = reply(request.Buffer);
+                    if (answer != null)
+                        await server.SendAsync(answer, request.RemoteEndPoint, ct);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+        await Task.CompletedTask;
+        return (server, loop);
+    }
+
+    private static readonly byte[] HeaderedReply = { 0x01, 0x11, 0x00, 0x04, 0, 0, 0, 1, 0x90, 0x50, 0x02, 0xFF };
+    private static readonly byte[] RawReply = { 0x90, 0x50, 0x02, 0xFF };
+
+    private static async Task<List<DiscoveredCamera>> Scan(IEnumerable<IPAddress> hosts, params ViscaProbeTarget[] targets)
+    {
+        var found = new System.Collections.Concurrent.ConcurrentBag<DiscoveredCamera>();
+        await CameraDiscoveryService.ScanViscaUdpAsync(IPAddress.Loopback, hosts, targets, TimeSpan.FromMilliseconds(700), found.Add, CancellationToken.None);
+        return found.ToList();
+    }
+
+    [Fact]
+    public async Task FindsCameraThatAnswersWithHeader()
+    {
+        using var cts = new CancellationTokenSource();
+        var (server, loop) = await StartFakeCamera(IPAddress.Parse("127.0.0.2"), 40111, _ => HeaderedReply, cts.Token);
+        try
+        {
+            var found = await Scan(new[] { IPAddress.Parse("127.0.0.2") }, new ViscaProbeTarget(40111, true));
+
+            var camera = Assert.Single(found);
+            Assert.Equal(IPAddress.Parse("127.0.0.2"), camera.Address);
+            Assert.Equal(40111, camera.ViscaPort);
+            Assert.Equal(Protocol.Udp, camera.ViscaProtocol);
+            Assert.True(camera.ViscaUseHeader);
+            Assert.Equal(DiscoverySource.ViscaScan, camera.Source);
+        }
+        finally { cts.Cancel(); server.Dispose(); await loop; }
+    }
+
+    [Fact]
+    public async Task FindsCameraThatAnswersRawViscaAndIgnoresNonViscaReplies()
+    {
+        using var cts = new CancellationTokenSource();
+        var (raw, rawLoop) = await StartFakeCamera(IPAddress.Parse("127.0.0.2"), 40112, _ => RawReply, cts.Token);
+        var (web, webLoop) = await StartFakeCamera(IPAddress.Parse("127.0.0.3"), 40112, _ => System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 400 Bad Request"), cts.Token);
+        try
+        {
+            var found = await Scan(new[] { IPAddress.Parse("127.0.0.2"), IPAddress.Parse("127.0.0.3") }, new ViscaProbeTarget(40112, false));
+
+            var camera = Assert.Single(found);
+            Assert.Equal(IPAddress.Parse("127.0.0.2"), camera.Address);
+            Assert.False(camera.ViscaUseHeader);
+        }
+        finally { cts.Cancel(); raw.Dispose(); web.Dispose(); await rawLoop; await webLoop; }
+    }
+
+    [Fact]
+    public async Task ManyClosedHostsDoNotPreventFindingTheCamera()
+    {
+        using var cts = new CancellationTokenSource();
+        var (server, loop) = await StartFakeCamera(IPAddress.Parse("127.0.0.200"), 40113, _ => HeaderedReply, cts.Token);
+        try
+        {
+            // 150 loopback addresses with nothing listening before and after the camera.
+            var hosts = Enumerable.Range(10, 220).Select(i => IPAddress.Parse($"127.0.0.{i}")).ToList();
+
+            var found = await Scan(hosts, new ViscaProbeTarget(40113, true));
+
+            Assert.Contains(found, c => c.Address.Equals(IPAddress.Parse("127.0.0.200")));
+        }
+        finally { cts.Cancel(); server.Dispose(); await loop; }
+    }
+
+    [Fact]
+    public async Task ReportsNothingWhenNoCameraAnswers()
+    {
+        var found = await Scan(new[] { IPAddress.Parse("127.0.0.50") }, new ViscaProbeTarget(40114, true));
+        Assert.Empty(found);
+    }
+}
+
+public class NdiNativeTests
+{
+    [Fact]
+    public void StructsMatchTheNdiHeadersOn64Bit()
+    {
+        if (IntPtr.Size != 8)
+            return; // sizes below are the 64-bit ones from the NDI SDK headers
+
+        Assert.Equal(16, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.Source>());
+        Assert.Equal(24, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.FindCreate>());
+        Assert.Equal(40, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.RecvCreateV3>());
+        Assert.Equal(72, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.VideoFrameV2>());
+        Assert.Equal(56, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.AudioFrameV2>());
+        Assert.Equal(24, System.Runtime.InteropServices.Marshal.SizeOf<PtzJoystickControl.Application.Ndi.NdiNative.MetadataFrame>());
+    }
+
+    [Fact]
+    public void LooksForTheNewestRuntimeFirst() =>
+        Assert.Equal("NDI_RUNTIME_DIR_V6", PtzJoystickControl.Application.Ndi.NdiNative.RuntimeDirVariables[0]);
+
+    [Fact]
+    public void RuntimeFileNameMatchesThePlatform()
+    {
+        var name = PtzJoystickControl.Application.Ndi.NdiNative.RuntimeFileName();
+        if (OperatingSystem.IsWindows())
+            Assert.Matches(@"^Processing\.NDI\.Lib\.x(64|86)\.dll$", name);
+        else
+            Assert.StartsWith("libndi", name);
+    }
+
+    [Fact]
+    public void ReadSourceNamesHandlesNullAndEmpty()
+    {
+        Assert.Empty(PtzJoystickControl.Application.Ndi.NdiNative.ReadSourceNames(IntPtr.Zero, 3));
+        Assert.Empty(PtzJoystickControl.Application.Ndi.NdiNative.ReadSourceNames(new IntPtr(1), 0));
     }
 }
