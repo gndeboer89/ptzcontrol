@@ -77,17 +77,17 @@ jobs:
           *.zip
 
   release:
-    needs: build-windows
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    # Waits for the macOS build too, but still publishes the Windows packages if that one fails or is skipped.
+    needs: [build-windows, build-macos-packeges]
+    if: ${{ !cancelled() && needs.build-windows.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-    - name: Download Windows packages
+    - name: Download packages
       uses: actions/download-artifact@v4
       with:
-        pattern: windows-*
         path: artifacts
 
     - name: GH Release
@@ -101,11 +101,9 @@ jobs:
         files: |
           artifacts/**/*.msi
           artifacts/**/*.zip
+          artifacts/**/*.dmg
 
   build-macos-packeges:
-    permissions:
-      contents: write
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
 
     steps:    
@@ -124,47 +122,28 @@ jobs:
     - name: Build
       run: dotnet publish Gui/Gui.csproj -c PublishRelease -r osx-x64 --self-contained #/p:PublishSingleFile=true /p:PublishTrimmed=true
 
-    - name: Install Dependencies
-      run: |
-        brew install create-dmg
-
     - name: Copy Files into app structure
       run: |
         mkdir -p dist/PTZJoystickControl.app/Contents/MacOS
         mkdir -p dist/PTZJoystickControl.app/Contents/Resources
-        cp Gui/bin/PublishRelease/net10.0/osx-x64/publish/* dist/PTZJoystickControl.app/Contents/MacOS
+        cp -R Gui/bin/PublishRelease/net10.0/osx-x64/publish/. dist/PTZJoystickControl.app/Contents/MacOS/
         cp Packaging/Mac/icon.icns dist/PTZJoystickControl.app/Contents/Resources/
         cp Packaging/Mac/Info.plist dist/PTZJoystickControl.app/Contents/
 
     - name: Update Info.plist version
       run: sed -i '' -e ':a' -e 'N' -e '$!ba' -e "s/<key>CFBundleVersion<\/key>\n\s*<string>[^<]*<\/string>/<key>CFBundleVersion<\/key>\n        <string>${{ steps.version.outputs.VERSION }}<\/string>/g" dist/PTZJoystickControl.app/Contents/Info.plist
 
+    # hdiutil is built into macOS and needs no Finder session. (create-dmg drives Finder through AppleScript,
+    # which fails on CI runners: "Finder got an error: Can't set item ... (-10006)".)
     - name: Create Installer
       run: |
-        create-dmg \
-          --volname "PTZJoystickControl.app" \
-          --volicon "dist/PTZJoystickControl.app/Contents/Resources/icon.icns" \
-          --window-pos 200 120 \
-          --window-size 800 400 \
-          --icon-size 100 \
-          --icon "dist/PTZJoystickControl.app/Contents/Resources/icon.icns" 200 190 \
-          --hide-extension "PTZJoystickControl.app" \
-          --app-drop-link 600 185 \
-          ${{ env.OutputName }}.dmg \
-          dist/PTZJoystickControl.app
+        ln -s /Applications dist/Applications
+        hdiutil create -volname "PTZ Joystick Control" -srcfolder dist -ov -format UDZO "${{ env.OutputName }}.dmg"
       env:
           OutputName: ${{ format('PTZJoystickControl_v{0}_osx_x64', steps.version.outputs.VERSION) }}
 
     - name: Upload build artifacts (dmg package)
-      if: ${{ github.event_name == 'push' }}
       uses: actions/upload-artifact@v4
       with:
-          name: DMG Package
+          name: macos-x64
           path: "*.dmg"
-
-    - name: GH Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
-      with:
-          prerelease: true
-          files: "*.dmg"

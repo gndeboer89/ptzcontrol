@@ -16,5 +16,11 @@
 		<true/>
 		<key>CFBundleExecutable</key>
 		<string>Gui</string>
+		<key>CFBundleName</key>
+		<string>PTZ Joystick Control</string>
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+		<key>CFBundleIconFile</key>
+		<string>icon.icns</string>
 	</dict>
 </plist>
