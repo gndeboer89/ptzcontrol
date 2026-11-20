@@ -1,11 +1,15 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vlc="clr-namespace:LibVLCSharp.Avalonia;assembly=LibVLCSharp.Avalonia"
              xmlns:vm="using:PtzJoystickControl.Gui.ViewModels"
              x:Class="PtzJoystickControl.Gui.Views.VideoSurface"
              x:DataType="vm:VideoViewModel">
+	<!--
+	  A plain image: no native child window, so it works wherever Avalonia itself runs.
+	  The Viewbox fits the picture into the available space while keeping the video's own proportions.
+	-->
 	<Grid Background="Black">
-		<vlc:VideoView MediaPlayer="{Binding MediaPlayer}" IsVisible="{Binding UsesVlc}"/>
-		<Image x:Name="NdiImage" Source="{Binding Frame}" Stretch="Uniform" IsVisible="{Binding UsesNdi}"/>
+		<Viewbox Stretch="Uniform">
+			<Image x:Name="NdiImage" Source="{Binding Frame}" Width="{Binding DisplayWidth}" Height="{Binding DisplayHeight}" Stretch="Fill"/>
+		</Viewbox>
 	</Grid>
 </UserControl>

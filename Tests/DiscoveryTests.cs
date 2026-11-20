@@ -640,3 +640,31 @@ public class CameraDiagnosticsTests
         finally { cts.Cancel(); server.Dispose(); await loop; }
     }
 }
+
+public class WindowsManifestTests
+{
+    private static string RepoFile(params string[] parts)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "PTZJoystickControl.sln")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return Path.Combine(new[] { dir!.FullName }.Concat(parts).ToArray());
+    }
+
+    [Fact]
+    public void ManifestDeclaresSupportedWindowsVersions()
+    {
+        // Without a supportedOS list Windows blocks the child window VLC's video view needs:
+        // "Unable to create child window for native control host".
+        var manifest = File.ReadAllText(RepoFile("Gui", "app.manifest"));
+
+        Assert.Contains("{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}", manifest); // Windows 10 / 11
+        Assert.Contains("{1f676c76-80e1-4239-95bb-83d0f6d0da78}", manifest); // Windows 8.1
+        System.Xml.Linq.XDocument.Parse(manifest); // well-formed
+    }
+
+    [Fact]
+    public void ProjectEmbedsTheManifest() =>
+        Assert.Contains("<ApplicationManifest>app.manifest</ApplicationManifest>", File.ReadAllText(RepoFile("Gui", "Gui.csproj")));
+}

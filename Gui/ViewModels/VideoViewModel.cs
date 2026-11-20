@@ -16,10 +16,11 @@ public class VideoViewModel : ViewModelBase, IDisposable
 {
     private readonly string _url;
     private MediaPlayer? _mediaPlayer;
+    private VlcFrameSink? _vlcSink;
     private NdiReceiver? _ndi;
     private WriteableBitmap? _frame;
     private byte[] _frameBuffer = Array.Empty<byte>();
-    private int _ndiUiPending;
+    private int _uiPending;
     private string _status = "Starting...";
     private bool _isPlaying;
     private bool _disposed;
@@ -49,17 +50,27 @@ public class VideoViewModel : ViewModelBase, IDisposable
     public bool UsesNdi => Kind == VideoSourceKind.Ndi;
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ReconnectCommand { get; }
 
-    public MediaPlayer? MediaPlayer
-    {
-        get => _mediaPlayer;
-        private set => this.RaiseAndSetIfChanged(ref _mediaPlayer, value);
-    }
-
-    /// <summary>Latest NDI frame (NDI sources only).</summary>
+    /// <summary>The latest picture, for RTSP/other streams (LibVLC) and NDI alike.</summary>
     public WriteableBitmap? Frame
     {
         get => _frame;
         private set => this.RaiseAndSetIfChanged(ref _frame, value);
+    }
+
+    /// <summary>
+    /// Size the picture should be shown at. LibVLC may hand over frames a few lines taller than the real picture
+    /// (for example 386 lines for a 360-line video); showing them at the source's own size keeps the proportions right.
+    /// </summary>
+    public double DisplayWidth
+    {
+        get => _displayWidth;
+        private set => this.RaiseAndSetIfChanged(ref _displayWidth, value);
+    }
+
+    public double DisplayHeight
+    {
+        get => _displayHeight;
+        private set => this.RaiseAndSetIfChanged(ref _displayHeight, value);
     }
 
     public string Status
@@ -107,16 +118,22 @@ public class VideoViewModel : ViewModelBase, IDisposable
             if (_mediaPlayer == null)
             {
                 var player = new MediaPlayer(libVlc);
+                // Frames come to us as pixels (no native child window), and cameras are watched, not listened to.
+                var sink = new VlcFrameSink();
+                sink.FrameAvailable += () => QueueFrameUpdate(() => sink.TryTakeFrame(ref _frameBuffer, out _frameWidth, out _frameHeight));
+                sink.Attach(player);
+                _vlcSink = sink;
                 player.Playing += (_, _) => OnUi(() => { IsPlaying = true; Status = "Playing"; });
                 player.Buffering += (_, e) => OnUi(() => Status = e.Cache < 100 ? $"Buffering {e.Cache:0}%" : "Playing");
                 player.EncounteredError += (_, _) => OnUi(() => { IsPlaying = false; Status = "Could not play the stream. Check the URL, username/password and that the camera is reachable."; });
                 player.EndReached += (_, _) => OnUi(() => { IsPlaying = false; Status = "Stream ended."; });
-                MediaPlayer = player;
+                _mediaPlayer = player;
             }
 
             // Prefer TCP-interleaved RTSP (survives Wi-Fi/firewalls) and a small buffer for low latency.
             // The media must stay alive until Play has run, so it is released inside the task below, not here.
             var media = new Media(libVlc, new Uri(_url));
+            media.AddOption(":no-audio");
             media.AddOption(":rtsp-tcp");
             media.AddOption(":network-caching=150");
             media.AddOption(":live-caching=150");
@@ -168,30 +185,72 @@ public class VideoViewModel : ViewModelBase, IDisposable
             Status = text;
             IsPlaying = text.StartsWith("Playing", StringComparison.Ordinal);
         });
-        receiver.FrameAvailable += () =>
-        {
-            // At most one UI update in flight; newer frames simply replace older ones.
-            if (System.Threading.Interlocked.Exchange(ref _ndiUiPending, 1) == 0)
-                Dispatcher.UIThread.Post(() => ShowNdiFrame(receiver), DispatcherPriority.Render);
-        };
+        receiver.FrameAvailable += () => QueueFrameUpdate(() => receiver == _ndi && receiver.TryTakeFrame(ref _frameBuffer, out _frameWidth, out _frameHeight));
         _ndi = receiver;
         receiver.Start();
     }
 
-    private void ShowNdiFrame(NdiReceiver receiver)
+    // ---- showing frames (both sources) -------------------------------------------------------
+
+    private int _frameWidth, _frameHeight;
+    private double _displayWidth = 16, _displayHeight = 9;
+
+    /// <summary>Called on a background thread when a new frame exists; shows it on the UI thread.</summary>
+    private void QueueFrameUpdate(Func<bool> takeFrame)
     {
-        System.Threading.Interlocked.Exchange(ref _ndiUiPending, 0);
-        if (_disposed || receiver != _ndi)
+        // At most one UI update in flight; newer frames simply replace older ones.
+        if (System.Threading.Interlocked.Exchange(ref _uiPending, 1) == 0)
+            Dispatcher.UIThread.Post(() => ShowFrame(takeFrame), DispatcherPriority.Render);
+    }
+
+    private void ShowFrame(Func<bool> takeFrame)
+    {
+        System.Threading.Interlocked.Exchange(ref _uiPending, 0);
+        if (_disposed || !takeFrame())
             return;
-        if (!receiver.TryTakeFrame(ref _frameBuffer, out var width, out var height))
+
+        int width = _frameWidth, height = _frameHeight;
+        if (width <= 0 || height <= 0)
             return;
 
         if (_frame == null || _frame.PixelSize.Width != width || _frame.PixelSize.Height != height)
             Frame = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
 
+        UpdateDisplaySize(width, height);
+
         using var locked = _frame!.Lock();
         FrameCopy.ToNative(_frameBuffer, height, width * 4, locked.Address, locked.RowBytes);
         FrameUpdated?.Invoke();
+    }
+
+    private void UpdateDisplaySize(int frameWidth, int frameHeight)
+    {
+        double w = frameWidth, h = frameHeight;
+
+        // For LibVLC streams ask for the real picture size; it is only known once the video output exists.
+        var player = _mediaPlayer;
+        if (player != null)
+        {
+            uint sourceWidth = 0, sourceHeight = 0;
+            try
+            {
+                if (player.Size(0, ref sourceWidth, ref sourceHeight) && sourceWidth > 0 && sourceHeight > 0)
+                {
+                    w = sourceWidth;
+                    h = sourceHeight;
+                }
+            }
+            catch (Exception e) when (e is VLCException or ObjectDisposedException)
+            {
+                // Keep the frame size.
+            }
+        }
+
+        if (Math.Abs(w - _displayWidth) > 0.5 || Math.Abs(h - _displayHeight) > 0.5)
+        {
+            DisplayWidth = w;
+            DisplayHeight = h;
+        }
     }
 
     private void StopNdi()
@@ -215,7 +274,9 @@ public class VideoViewModel : ViewModelBase, IDisposable
         StopNdi();
 
         var player = _mediaPlayer;
+        var sink = _vlcSink;
         _mediaPlayer = null;
+        _vlcSink = null;
         if (player == null)
             return;
 
@@ -226,6 +287,7 @@ public class VideoViewModel : ViewModelBase, IDisposable
             {
                 player.Stop();
                 player.Dispose();
+                sink?.Dispose();
             }
             catch (Exception e)
             {
