@@ -668,3 +668,182 @@ public class WindowsManifestTests
     public void ProjectEmbedsTheManifest() =>
         Assert.Contains("<ApplicationManifest>app.manifest</ApplicationManifest>", File.ReadAllText(RepoFile("Gui", "Gui.csproj")));
 }
+
+public class RawViscaReplyTests
+{
+    private static PtzJoystickControl.Application.Devices.ViscaIpDevice NewDevice() => new("test");
+
+    private static byte[] Buffer128(params byte[] data)
+    {
+        var buffer = new byte[128];
+        data.CopyTo(buffer, 0);
+        return buffer;
+    }
+
+    [Fact]
+    public void PlainAckIsAcceptedAndCountsAsAnswer()
+    {
+        var device = NewDevice();
+        var before = device.LastReceiveTime;
+
+        PtzJoystickControl.Core.ViscaCommands.ViscaIPCommandParser.ParseReply(device, Buffer128(0x90, 0x41, 0xFF), 3);
+
+        Assert.True(device.Acked);
+        Assert.True(device.LastReceiveTime > before);
+    }
+
+    [Fact]
+    public void AckAndCompletionInOneDatagramAreBothHandled()
+    {
+        var device = NewDevice();
+
+        PtzJoystickControl.Core.ViscaCommands.ViscaIPCommandParser.ParseReply(device, Buffer128(0x90, 0x41, 0xFF, 0x90, 0x51, 0xFF), 6);
+
+        Assert.True(device.Acked);
+        Assert.True(device.Completed);
+    }
+
+    [Fact]
+    public void ReplyWithHeaderStillWorks()
+    {
+        var device = NewDevice();
+        // payload type 0x0111 (reply), length 3, sequence 7, then a completion
+        var packet = Buffer128(0x01, 0x11, 0x00, 0x03, 0x00, 0x00, 0x00, 0x07, 0x90, 0x51, 0xFF);
+
+        PtzJoystickControl.Core.ViscaCommands.ViscaIPCommandParser.ParseReply(device, packet, 11);
+
+        Assert.True(device.Completed);
+        Assert.Equal(7, device.remotePacketId);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x90, 0x41, 0xFF }, true)]
+    [InlineData(new byte[] { 0x90, 0x50, 0x02, 0xFF }, true)]
+    [InlineData(new byte[] { 0x01, 0x11, 0, 3, 0, 0, 0, 1, 0x90, 0x51, 0xFF }, false)]
+    [InlineData(new byte[] { 0x90, 0x41 }, false)]
+    public void ClassifiesPlainReplies(byte[] data, bool expected) =>
+        Assert.Equal(expected, PtzJoystickControl.Core.ViscaCommands.ViscaIPCommandParser.IsRawViscaReply(Buffer128(data), 0, data.Length));
+
+    [Fact]
+    public void AnUnparsablePacketDoesNotThrowOutOfTheDevice()
+    {
+        var device = NewDevice();
+        var garbage = Buffer128(0x13, 0x37);
+
+        var error = Record.Exception(() => device.ParseViscaIPReply(garbage, 2));
+
+        Assert.Null(error); // otherwise the shared receive loop would stop for every camera
+    }
+
+    [Theory]
+    [InlineData(false)]  // Header box ticked in the app
+    [InlineData(true)]   // Header box not ticked
+    public async Task DeviceShowsConnectedWhenTheCameraAnswersInPlainVisca(bool headerOn)
+    {
+        // The Tenveo case: the camera accepts the command but answers without the VISCA-over-IP header.
+        int port = headerOn ? 40561 : 40562;
+        using var cts = new CancellationTokenSource();
+        using var camera = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
+        var loop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var request = await camera.ReceiveAsync(cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x41, 0xFF }, request.RemoteEndPoint, cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x51, 0xFF }, request.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+
+        var device = new PtzJoystickControl.Application.Devices.ViscaIpDevice("t", new IPEndPoint(IPAddress.Loopback, port))
+        {
+            Protocol = PtzJoystickControl.Core.Devices.Protocol.Udp,
+            UseHeader = headerOn,
+        };
+        device.BeginSocket();
+        device.PanTilt(5, 5, PtzJoystickControl.Core.Devices.PanDir.Left, PtzJoystickControl.Core.Devices.TiltDir.Up);
+
+        bool connected = false;
+        for (int i = 0; i < 40 && !connected; i++)
+        {
+            connected = device.Connected;
+            if (!connected) await Task.Delay(50);
+        }
+
+        cts.Cancel();
+        device.EndSocket();
+        await loop;
+        Assert.True(connected, "the camera answered, so the status must be Connected");
+    }
+}
+
+public class HeaderDetectionTests
+{
+    [Theory]
+    [InlineData(new byte[] { 0x01, 0x11, 0, 3, 0, 0, 0, 1, 0x90, 0x50, 0xFF }, true)]
+    [InlineData(new byte[] { 0x90, 0x50, 0x02, 0xFF }, false)]
+    public void RecognisesWhetherAReplyHasTheHeader(byte[] data, bool expected) =>
+        Assert.Equal(expected, ViscaProbe.IsHeaderedReply(data, data.Length));
+
+    [Fact]
+    public async Task ScanSetsHeaderOffForCameraThatAnswersPlainToAHeaderedProbe()
+    {
+        // What the Tenveo does: a headered probe on 52381 gets a plain 90 50 02 FF back.
+        using var cts = new CancellationTokenSource();
+        var address = IPAddress.Parse("127.0.0.6");
+        using var camera = new UdpClient(new IPEndPoint(address, 40171));
+        var loop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var request = await camera.ReceiveAsync(cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x50, 0x02, 0xFF }, request.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+
+        var found = new System.Collections.Concurrent.ConcurrentBag<DiscoveredCamera>();
+        await CameraDiscoveryService.ScanViscaUdpAsync(IPAddress.Loopback, new[] { address }, new[] { new ViscaProbeTarget(40171, true) },
+            TimeSpan.FromMilliseconds(700), found.Add, CancellationToken.None);
+        cts.Cancel(); camera.Dispose(); await loop;
+
+        var result = Assert.Single(found);
+        Assert.Equal(40171, result.ViscaPort);
+        Assert.False(result.ViscaUseHeader);
+    }
+
+    [Fact]
+    public async Task ReportTellsToLeaveHeaderOffForAPlainAnswer()
+    {
+        using var cts = new CancellationTokenSource();
+        var address = IPAddress.Parse("127.0.0.7");
+        using var camera = new UdpClient(new IPEndPoint(address, 40181));
+        var loop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var request = await camera.ReceiveAsync(cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x50, 0x02, 0xFF }, request.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+
+        var lines = await CameraDiagnostics.RunAsync(address, new[] { new ViscaProbeTarget(40181, true) }, Array.Empty<int>(), 40184, TimeSpan.FromMilliseconds(600), CancellationToken.None);
+        cts.Cancel(); camera.Dispose(); await loop;
+
+        Assert.Contains(lines, l => l.StartsWith("UDP 40181") && l.Contains("plain, without header"));
+        Assert.Contains(lines, l => l.StartsWith("Result:") && l.Contains("leave the Header box unticked"));
+    }
+}

@@ -50,6 +50,10 @@ public static class ViscaProbe
             && (data[8] & 0xF0) == 0x90;
     }
 
+    /// <summary>True when the reply carries the 8-byte VISCA-over-IP header (01 11 ...), false for plain VISCA (90 50 ... FF).</summary>
+    public static bool IsHeaderedReply(byte[] data, int length) =>
+        length >= 9 && ((data[0] == 0x01 && data[1] == 0x11) || (data[0] == 0x02 && data[1] == 0x01));
+
     public static DiscoveredCamera ToCamera(IPAddress address, ViscaProbeTarget target) => new(address)
     {
         Source = DiscoverySource.ViscaScan,
@@ -57,4 +61,11 @@ public static class ViscaProbe
         ViscaProtocol = Protocol.Udp,
         ViscaUseHeader = target.UseHeader,
     };
+
+    /// <summary>
+    /// Like <see cref="ToCamera(IPAddress, ViscaProbeTarget)"/>, but takes the Header setting from how the camera actually
+    /// replied: a camera that answers in plain VISCA (even to a headered probe) is added with Header off.
+    /// </summary>
+    public static DiscoveredCamera ToCamera(IPAddress address, ViscaProbeTarget target, bool replyHadHeader) =>
+        ToCamera(address, target) with { ViscaUseHeader = replyHadHeader };
 }

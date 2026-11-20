@@ -165,7 +165,7 @@ public class CameraDiscoveryService : ICameraDiscoveryService
                 {
                     if (target.Port == result.RemoteEndPoint.Port)
                     {
-                        report(ViscaProbe.ToCamera(result.RemoteEndPoint.Address, target));
+                        report(ViscaProbe.ToCamera(result.RemoteEndPoint.Address, target, ViscaProbe.IsHeaderedReply(result.Buffer, result.Buffer.Length)));
                         break;
                     }
                 }
