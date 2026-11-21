@@ -1174,3 +1174,288 @@ public class UdpSocketTests
     public void OtherErrorsStillCloseTheSocket(System.Net.Sockets.SocketError error) =>
         Assert.False(PtzJoystickControl.Core.Utils.UdpSocket.IsHarmlessReceiveError(error));
 }
+
+public class SelectCameraStepTests
+{
+    // Just enough of a gamepad for the select-camera command.
+    private sealed class FakeGamepad : PtzJoystickControl.Core.Devices.IGamepad
+    {
+        private PtzJoystickControl.Core.Devices.ViscaDeviceBase? selected;
+        public string Id => "fake";
+        public string Name => "fake";
+        public bool IsActivated { get; set; }
+        public bool IsConnected { get; set; }
+        public System.Collections.ObjectModel.ObservableCollection<PtzJoystickControl.Core.Devices.ViscaDeviceBase>? Cameras { get; set; } = new();
+        public IReadOnlyList<PtzJoystickControl.Core.Commands.ICommand> Commands => Array.Empty<PtzJoystickControl.Core.Commands.ICommand>();
+        public bool DetectInput { get; set; }
+        public IEnumerable<PtzJoystickControl.Core.Devices.IInput> Inputs => Array.Empty<PtzJoystickControl.Core.Devices.IInput>();
+        public PtzJoystickControl.Core.Devices.ViscaDeviceBase? SelectedCamera
+        {
+            get => selected;
+            set { selected = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(SelectedCamera))); }
+        }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public event System.ComponentModel.PropertyChangedEventHandler? PersistentPropertyChanged { add { } remove { } }
+        public void Acquire() { }
+        public void Unacquire() { }
+        public void Update() { }
+    }
+
+    private static (FakeGamepad Gamepad, PtzJoystickControl.Application.Commands.SelectCameraCommand Command, PtzJoystickControl.Application.Devices.ViscaIpDevice[] Cameras) Create(int count)
+    {
+        var gamepad = new FakeGamepad();
+        var cameras = Enumerable.Range(1, count).Select(i => new PtzJoystickControl.Application.Devices.ViscaIpDevice($"Cam {i}")).ToArray();
+        foreach (var camera in cameras)
+            gamepad.Cameras!.Add(camera);
+        return (gamepad, new PtzJoystickControl.Application.Commands.SelectCameraCommand(gamepad), cameras);
+    }
+
+    private const int Next = PtzJoystickControl.Application.Commands.SelectCameraCommand.NextCameraValue;
+    private const int Previous = PtzJoystickControl.Application.Commands.SelectCameraCommand.PreviousCameraValue;
+
+    [Theory]
+    [InlineData(3, -1, +1, 0)]   // nothing selected, up: the first
+    [InlineData(3, -1, -1, 2)]   // nothing selected, down: the last
+    [InlineData(3, 0, +1, 1)]
+    [InlineData(3, 1, +1, 2)]
+    [InlineData(3, 2, +1, 0)]    // after the last comes the first
+    [InlineData(3, 2, -1, 1)]
+    [InlineData(3, 0, -1, 2)]    // before the first comes the last
+    [InlineData(1, 0, +1, 0)]    // a single camera stays selected
+    [InlineData(1, 0, -1, 0)]
+    [InlineData(0, -1, +1, -1)]  // no cameras at all
+    [InlineData(3, 7, +1, 0)]    // selected camera no longer in the list
+    public void SteppedIndexWrapsAround(int count, int current, int step, int expected) =>
+        Assert.Equal(expected, PtzJoystickControl.Application.Commands.SelectCameraCommand.SteppedIndex(count, current, step));
+
+    [Fact]
+    public void NextCyclesUpwardsAndWraps()
+    {
+        var (gamepad, command, cameras) = Create(3);
+
+        var seen = new List<string>();
+        for (int i = 0; i < 4; i++)
+        {
+            command.Execute(Next);
+            seen.Add(gamepad.SelectedCamera!.Name);
+        }
+
+        Assert.Equal(new[] { "Cam 1", "Cam 2", "Cam 3", "Cam 1" }, seen);
+    }
+
+    [Fact]
+    public void PreviousCyclesDownwardsAndWraps()
+    {
+        var (gamepad, command, _) = Create(3);
+
+        var seen = new List<string>();
+        for (int i = 0; i < 4; i++)
+        {
+            command.Execute(Previous);
+            seen.Add(gamepad.SelectedCamera!.Name);
+        }
+
+        Assert.Equal(new[] { "Cam 3", "Cam 2", "Cam 1", "Cam 3" }, seen);
+    }
+
+    [Fact]
+    public void StepsStartFromTheCameraThatWasChosenByHand()
+    {
+        var (gamepad, command, cameras) = Create(4);
+        command.Execute(2); // a fixed camera, as before: Cam 3
+
+        command.Execute(Next);
+        Assert.Equal("Cam 4", gamepad.SelectedCamera!.Name);
+
+        command.Execute(2);
+        command.Execute(Previous);
+        Assert.Equal("Cam 2", gamepad.SelectedCamera!.Name);
+    }
+
+    [Fact]
+    public void WithoutCamerasStepsDoNothing()
+    {
+        var (gamepad, command, _) = Create(0);
+
+        command.Execute(Next);
+        command.Execute(Previous);
+
+        Assert.Null(gamepad.SelectedCamera);
+    }
+
+    [Fact]
+    public void OptionsKeepCameraPositionsAndAddTheTwoStepOptionsAtTheEnd()
+    {
+        var (_, command, _) = Create(3);
+
+        var options = command.Options.ToList();
+
+        Assert.Equal(5, options.Count);
+        // positions in the list must equal camera positions: other code looks cameras up by position
+        Assert.Equal(new[] { 0, 1, 2 }, options.Take(3).Select(o => o.Value));
+        Assert.Equal(new[] { "Cam 1", "Cam 2", "Cam 3" }, options.Take(3).Select(o => o.Name));
+        Assert.Equal("Next camera (ascending)", options[3].Name);
+        Assert.Equal(Next, options[3].Value);
+        Assert.Equal("Previous camera (descending)", options[4].Name);
+        Assert.Equal(Previous, options[4].Value);
+    }
+
+    [Fact]
+    public void TheStepOptionsAlsoExistWhenNoCameraHasBeenAddedYet()
+    {
+        var (_, command, _) = Create(0);
+
+        Assert.Equal(new[] { Next, Previous }, command.Options.Select(o => o.Value));
+    }
+
+    [Fact]
+    public void TheOptionObjectCanBeExecutedDirectly()
+    {
+        // This is what a button does: it executes the option chosen in the list.
+        var (gamepad, command, _) = Create(2);
+        var next = command.Options.First(o => o.Value == Next);
+
+        command.Execute(next);
+
+        Assert.Equal("Cam 1", gamepad.SelectedCamera!.Name);
+    }
+}
+
+public class SelectCameraButtonTests
+{
+    private sealed class Gamepad : PtzJoystickControl.Core.Devices.IGamepad
+    {
+        private PtzJoystickControl.Core.Devices.ViscaDeviceBase? selected;
+        public string Id => "fake";
+        public string Name => "fake";
+        public bool IsActivated { get; set; }
+        public bool IsConnected { get; set; }
+        public System.Collections.ObjectModel.ObservableCollection<PtzJoystickControl.Core.Devices.ViscaDeviceBase>? Cameras { get; set; } = new();
+        public IReadOnlyList<PtzJoystickControl.Core.Commands.ICommand> Commands => Array.Empty<PtzJoystickControl.Core.Commands.ICommand>();
+        public bool DetectInput { get; set; }
+        public IEnumerable<PtzJoystickControl.Core.Devices.IInput> Inputs => Array.Empty<PtzJoystickControl.Core.Devices.IInput>();
+        public PtzJoystickControl.Core.Devices.ViscaDeviceBase? SelectedCamera
+        {
+            get => selected;
+            set { selected = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(SelectedCamera))); }
+        }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public event System.ComponentModel.PropertyChangedEventHandler? PersistentPropertyChanged { add { } remove { } }
+        public void Acquire() { }
+        public void Unacquire() { }
+        public void Update() { }
+    }
+
+    private static (Gamepad Gamepad, PtzJoystickControl.Application.Devices.Input Button, PtzJoystickControl.Application.Devices.ViscaIpDevice[] Cameras) Setup(int stepValue, int cameraCount = 3)
+    {
+        var gamepad = new Gamepad();
+        var cameras = Enumerable.Range(1, cameraCount).Select(i => new PtzJoystickControl.Application.Devices.ViscaIpDevice($"Cam {i}")).ToArray();
+        foreach (var camera in cameras)
+            gamepad.Cameras!.Add(camera);
+
+        var commands = new PtzJoystickControl.Application.Services.CommandsService().GetCommandsForGamepad(gamepad).ToList();
+        var button = new PtzJoystickControl.Application.Devices.Input("b1", "Button 1", PtzJoystickControl.Core.Devices.InputType.Button, commands);
+        button.SelectedCommand = commands.OfType<PtzJoystickControl.Application.Commands.SelectCameraCommand>().Single();
+        button.CommandValue = button.Values!.First(v => v.Value == stepValue);
+        return (gamepad, button, cameras);
+    }
+
+    private static void Press(PtzJoystickControl.Application.Devices.Input button)
+    {
+        button.InputValue = 1;
+        button.InputValue = 0;
+    }
+
+    [Fact]
+    public void EachPressOfTheNextButtonMovesOneCameraUp()
+    {
+        var (gamepad, button, _) = Setup(PtzJoystickControl.Application.Commands.SelectCameraCommand.NextCameraValue);
+
+        var seen = new List<string>();
+        for (int i = 0; i < 4; i++) { Press(button); seen.Add(gamepad.SelectedCamera!.Name); }
+
+        Assert.Equal(new[] { "Cam 1", "Cam 2", "Cam 3", "Cam 1" }, seen);
+    }
+
+    [Fact]
+    public void EachPressOfThePreviousButtonMovesOneCameraDown()
+    {
+        var (gamepad, button, _) = Setup(PtzJoystickControl.Application.Commands.SelectCameraCommand.PreviousCameraValue);
+
+        var seen = new List<string>();
+        for (int i = 0; i < 4; i++) { Press(button); seen.Add(gamepad.SelectedCamera!.Name); }
+
+        Assert.Equal(new[] { "Cam 3", "Cam 2", "Cam 1", "Cam 3" }, seen);
+    }
+
+    [Fact]
+    public void HoldingTheButtonStepsOnlyOnce()
+    {
+        var (gamepad, button, _) = Setup(PtzJoystickControl.Application.Commands.SelectCameraCommand.NextCameraValue);
+
+        button.InputValue = 1;
+        button.InputValue = 1;
+        button.InputValue = 1; // still held
+        Assert.Equal("Cam 1", gamepad.SelectedCamera!.Name);
+
+        button.InputValue = 0;
+        button.InputValue = 1;
+        Assert.Equal("Cam 2", gamepad.SelectedCamera!.Name);
+    }
+
+    [Fact]
+    public void ANextAndAPreviousButtonCanWorkTogether()
+    {
+        var (gamepad, next, _) = Setup(PtzJoystickControl.Application.Commands.SelectCameraCommand.NextCameraValue);
+        var commands = new PtzJoystickControl.Application.Services.CommandsService().GetCommandsForGamepad(gamepad).ToList();
+        var previous = new PtzJoystickControl.Application.Devices.Input("b2", "Button 2", PtzJoystickControl.Core.Devices.InputType.Button, commands);
+        previous.SelectedCommand = commands.OfType<PtzJoystickControl.Application.Commands.SelectCameraCommand>().Single();
+        previous.CommandValue = previous.Values!.First(v => v.Value == PtzJoystickControl.Application.Commands.SelectCameraCommand.PreviousCameraValue);
+
+        Press(next); Press(next); Press(next);   // Cam 3
+        Press(previous);                          // Cam 2
+
+        Assert.Equal("Cam 2", gamepad.SelectedCamera!.Name);
+    }
+
+    [Fact]
+    public void TheChoiceSurvivesRenamingAndRemovingCameras()
+    {
+        var (gamepad, button, cameras) = Setup(PtzJoystickControl.Application.Commands.SelectCameraCommand.NextCameraValue);
+
+        cameras[1].Name = "Stage left";   // used to reset any option with a negative value
+        gamepad.Cameras!.Remove(cameras[0]);
+
+        Assert.NotNull(button.CommandValue);
+        Assert.Equal(PtzJoystickControl.Application.Commands.SelectCameraCommand.NextCameraValue, button.CommandValue!.Value);
+        Press(button);
+        Assert.Equal("Stage left", gamepad.SelectedCamera!.Name);
+    }
+
+    [Fact]
+    public void AFixedCameraChoiceStillMovesWhenAnEarlierCameraIsRemoved()
+    {
+        var (gamepad, button, cameras) = Setup(stepValue: 2); // "Cam 3", as before this feature
+
+        gamepad.Cameras!.Remove(cameras[0]); // Cam 3 is now at position 1
+
+        Assert.Equal(1, button.CommandValue!.Value);
+        Press(button);
+        Assert.Equal("Cam 3", gamepad.SelectedCamera!.Name);
+    }
+
+    [Theory]
+    [InlineData(-1, "Next camera (ascending)")]
+    [InlineData(-2, "Previous camera (descending)")]
+    [InlineData(0, "Cam 1")]
+    public void TheChoiceIsSavedAndLoadedAgain(int value, string name)
+    {
+        var saved = System.Text.Json.JsonSerializer.Serialize(new PtzJoystickControl.Core.Model.CommandValueOption(name, value));
+
+        var loaded = System.Text.Json.JsonSerializer.Deserialize<PtzJoystickControl.Core.Model.CommandValueOption>(saved);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(value, loaded!.Value);
+        Assert.Equal(name, loaded.Name);
+    }
+}
