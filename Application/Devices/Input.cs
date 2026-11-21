@@ -1,4 +1,4 @@
-﻿using PtzJoystickControl.Core.Commands;
+using PtzJoystickControl.Core.Commands;
 using PtzJoystickControl.Core.Devices;
 using PtzJoystickControl.Application.Commands;
 using System.ComponentModel;
@@ -320,7 +320,7 @@ public class Input : IInput
             if (CommandValue.Value == e.OldStartingIndex)
                 CommandValue = null;
             else if (CommandValue.Value > e.OldStartingIndex)
-                CommandValue = Values?.ElementAtOrDefault(CommandValue.Value - 1);
+                CommandValue = Values?.FirstOrDefault(v => v.Value == CommandValue.Value - 1);
         }
         NotifyPropertyChanged(nameof(Values));
         NotifyPropertyChanged(nameof(CommandValue));
@@ -328,7 +328,9 @@ public class Input : IInput
 
     private void OnSelectCameraCommandPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        var UpdatedValue = Values?.ElementAtOrDefault(CommandValue?.Value ?? -1);
+        // By value, not by position: the options that step through the cameras have negative values.
+        var current = CommandValue;
+        var UpdatedValue = current is null ? null : Values?.FirstOrDefault(v => v.Value == current.Value);
         if (UpdatedValue?.Name != CommandValue?.Name)
             CommandValue = UpdatedValue;
         NotifyPropertyChanged(nameof(Values));
