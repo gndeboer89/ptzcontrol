@@ -1459,3 +1459,86 @@ public class SelectCameraButtonTests
         Assert.Equal(name, loaded.Name);
     }
 }
+
+public class PresetWireTests
+{
+    private sealed class Gamepad : PtzJoystickControl.Core.Devices.IGamepad
+    {
+        private PtzJoystickControl.Core.Devices.ViscaDeviceBase? selected;
+        public string Id => "fake";
+        public string Name => "fake";
+        public bool IsActivated { get; set; }
+        public bool IsConnected { get; set; }
+        public System.Collections.ObjectModel.ObservableCollection<PtzJoystickControl.Core.Devices.ViscaDeviceBase>? Cameras { get; set; } = new();
+        public IReadOnlyList<PtzJoystickControl.Core.Commands.ICommand> Commands => Array.Empty<PtzJoystickControl.Core.Commands.ICommand>();
+        public bool DetectInput { get; set; }
+        public IEnumerable<PtzJoystickControl.Core.Devices.IInput> Inputs => Array.Empty<PtzJoystickControl.Core.Devices.IInput>();
+        public PtzJoystickControl.Core.Devices.ViscaDeviceBase? SelectedCamera
+        {
+            get => selected;
+            set { selected = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(SelectedCamera))); }
+        }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public event System.ComponentModel.PropertyChangedEventHandler? PersistentPropertyChanged { add { } remove { } }
+        public void Acquire() { }
+        public void Unacquire() { }
+        public void Update() { }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PresetsGoOverTheWireAsSetAndRecall(bool header)
+    {
+        int port = header ? 40601 : 40602;
+        var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var cts = new CancellationTokenSource();
+        using var camera = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
+        var loop = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var r = await camera.ReceiveAsync(cts.Token);
+                    received.Enqueue(BitConverter.ToString(r.Buffer));
+                    await camera.SendAsync(new byte[] { 0x90, 0x41, 0xFF }, r.RemoteEndPoint, cts.Token);
+                    await camera.SendAsync(new byte[] { 0x90, 0x51, 0xFF }, r.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
+
+        var device = new PtzJoystickControl.Application.Devices.ViscaIpDevice("t", new IPEndPoint(IPAddress.Loopback, port))
+        {
+            Protocol = PtzJoystickControl.Core.Devices.Protocol.Udp,
+            UseHeader = header,
+            HeartbeatInterval = TimeSpan.FromHours(1), // keep the heartbeat out of the way: only the preset commands are looked at
+        };
+        device.BeginSocket();
+        await Task.Delay(300);
+        while (received.TryDequeue(out _)) { } // drop the first check
+
+        var gamepad = new Gamepad();
+        gamepad.Cameras!.Add(device);
+        gamepad.SelectedCamera = device;
+        var command = new PtzJoystickControl.Application.Commands.PresetCommand(gamepad);
+        var setThree = command.Options.First(o => o.Name == "Set - 3");
+        var recallThree = command.Options.First(o => o.Name == "Recall - 3");
+
+        command.Execute(setThree);
+        await Task.Delay(300);
+        command.Execute(recallThree);
+        await Task.Delay(300);
+
+        cts.Cancel(); device.EndSocket(); await loop;
+
+        var sent = received.ToArray();
+        string payload(string s) => s.Contains("81-01-04-3F") ? s[s.IndexOf("81-01-04-3F")..] : s;
+        // preset 3 is VISCA number 2; Set = 01, Recall = 02
+        Assert.Contains(sent, s => payload(s) == "81-01-04-3F-01-02-FF");
+        Assert.Contains(sent, s => payload(s) == "81-01-04-3F-02-02-FF");
+        device.EndSocket();
+    }
+}
